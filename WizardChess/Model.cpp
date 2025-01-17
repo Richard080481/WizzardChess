@@ -53,7 +53,7 @@ void Model::Load(std::string fileNmae)
                 };
             }
 
-            vertex.color = { vertex.pos[2], vertex.pos[2], vertex.pos[2] };
+            vertex.color = { vertex.pos[0], vertex.pos[1], vertex.pos[2] };
 
 #define USE_UNIQUE_VERTICES 0
 #if 0
@@ -81,13 +81,11 @@ void Model::Load(std::string fileNmae)
                                                   (m_boundaries[2] + m_boundaries[3]) / 2,
                                                   (m_boundaries[4] + m_boundaries[5]) / 2));
 
-    float depthRange = (m_boundaries[5] - m_boundaries[4]);
     for (auto& vertex : m_vertices)
     {
-        for (int i = 0; i < 3; i++)
-        {
-            vertex.color[i] = (vertex.color[i] - m_boundaries[4]) / depthRange;
-        }
+        vertex.color[0] = (vertex.color[0] - m_boundaries[0]) / (m_boundaries[1] - m_boundaries[0]);
+        vertex.color[1] = (vertex.color[1] - m_boundaries[2]) / (m_boundaries[3] - m_boundaries[2]);
+        vertex.color[2] = (vertex.color[2] - m_boundaries[4]) / (m_boundaries[5] - m_boundaries[4]);
     }
 }
 

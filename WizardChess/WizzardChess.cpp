@@ -26,9 +26,16 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
+#define ARRAY_SIZE(x) (sizeof((x)) / sizeof((x)[0]))
+
 const std::string modelPaths[] =
 {
-    "models/King.obj"
+    "models/simplify_Bishop.obj",
+    "models/simplify_King.obj",
+    "models/simplify_Knight.obj",
+    "models/simplify_Rook.obj",
+    "models/simplify_Pawn.obj",
+    "models/simplify_Queen.obj"
 };
 const std::string TEXTURE_PATH = "textures/oak.jpg";
 
@@ -875,10 +882,22 @@ void WizzardChess::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t wi
     endSingleTimeCommands(m_device, m_graphicsQueue, m_commandPool, commandBuffer);
 }
 
-void WizzardChess::loadModel() {
-    for (const auto& fileName : modelPaths)
+void WizzardChess::loadModel()
+{
+    constexpr int numModels = ARRAY_SIZE(modelPaths);
+    constexpr float x_offset = 1.5f;
+    constexpr float theta = 360.0f / numModels;
+
+    for (int i = 0; i < numModels; i++)
     {
-        Model* pModel = new Model(m_physicalDevice, m_device, m_graphicsQueue, m_commandPool, fileName);
+        Model* pModel = new Model(m_physicalDevice, m_device, m_graphicsQueue, m_commandPool, modelPaths[i]);
+
+        pModel->Rotate(theta * i, glm::vec3(0.0f, 1.0f, 0.0f));
+        pModel->Translate(glm::vec3(x_offset, 0.0f, 0.0f));
+
+        ///@note Originally the model was along z-axis.
+        ///      Rotate -90 degree along x-axis to make it pointing to the y-axis.
+        pModel->Rotate(-90.0f, glm::vec3(1.0f, 0.0f, 0.0f));
         m_models.push_back(pModel);
     }
 }
@@ -1017,23 +1036,29 @@ void WizzardChess::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[m_currentFrame], 0, nullptr);
 
-    VkBuffer vertexBuffers[] = { m_models[0]->VertexBuffer() };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
-    vkCmdBindIndexBuffer(commandBuffer, m_models[0]->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     ModelPushConstants constants{};
-    constants.normailzeMatrix = m_models[0]->NormalizeMatrix();
-    constants.model = glm::mat4(1.0);
-    constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 1.0f));
-    vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ModelPushConstants), &constants);
 
-    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_models[0]->Indices()), 1, 0, 0, 0);
+    for(auto& model : m_models)
+    {
+        constants.model = glm::mat4(1.0);
+        constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        constants.model = constants.model * model->ModelMatrix();
+
+        VkBuffer vertexBuffers[] = { model->VertexBuffer() };
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+        vkCmdBindIndexBuffer(commandBuffer, model->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        constants.normailzeMatrix = model->NormalizeMatrix();
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ModelPushConstants), &constants);
+
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(model->Indices()), 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(commandBuffer);
 
@@ -1065,10 +1090,12 @@ void WizzardChess::createSyncObjects() {
 
 void WizzardChess::updateUniformBuffer(uint32_t currentImage, int modelIndex) {
     UniformBufferObject ubo{};
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(0.0f, 1.0f, 5.0f),
+        glm::vec3(0.0f, -0.5f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective(glm::radians(45.0f), m_swapChainExtent.width / (float)m_swapChainExtent.height, 0.1f, 10.0f);
+
+    // Vulkan's y-axis is pointing downwards.
     ubo.proj[1][1] *= -1;
 
     memcpy(m_uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));

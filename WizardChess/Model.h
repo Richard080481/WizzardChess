@@ -28,7 +28,8 @@ public:
         m_physicalDevice(phyicalDevice),
         m_device(device),
         m_queue(queue),
-        m_commandPool(commandPool)
+        m_commandPool(commandPool),
+        m_modelMatrix(glm::mat4(1.0f))
     {
         Load(fileName);
         createVertexBuffer();
@@ -48,12 +49,25 @@ public:
     VkBuffer  IndexBuffer()     const { return m_indexBuffer; }
     size_t    Indices()         const { return m_indices.size(); }
     glm::mat4 NormalizeMatrix() const { return m_normalizeMatrix; }
+    glm::mat4 ModelMatrix()     const { return m_modelMatrix; }
+
+    void Translate(glm::vec3 tranlation)
+    {
+        m_modelMatrix = glm::translate(m_modelMatrix, tranlation);
+    }
+
+    void Rotate(float degree, glm::vec3 axis)
+    {
+        m_modelMatrix = glm::rotate(m_modelMatrix, glm::radians(degree), axis);
+    }
+
 
 private:
     void createIndexBuffer();
     void createVertexBuffer();
     void Load(std::string fileName);
 
+    glm::mat4 m_modelMatrix;
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
     float m_boundaries[6] = {};
