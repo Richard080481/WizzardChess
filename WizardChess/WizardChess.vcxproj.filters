@@ -24,7 +24,7 @@
     <ClCompile Include="Model.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="WizzardChess.cpp">
+    <ClCompile Include="WizardChess.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -49,7 +49,7 @@
     <ClInclude Include="main.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="WizzardChess.h">
+    <ClInclude Include="WizardChess.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

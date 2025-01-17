@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-#include "WizzardChess.h"
+#include "WizardChess.h"
 
 namespace std {
     template<> struct hash<Vertex> {
