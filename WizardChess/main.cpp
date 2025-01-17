@@ -150,14 +150,6 @@ private:
     VkSampler m_textureSampler;
 
     std::vector<Model*> m_models;
-    // std::vector<Vertex> m_vertices;
-    // std::vector<uint32_t> m_indices;
-    // float m_boundaries[6] = {};
-    // VkBuffer m_vertexBuffer;
-    // VkDeviceMemory m_vertexBufferMemory;
-    // VkBuffer m_indexBuffer;
-    // VkDeviceMemory m_indexBufferMemory;
-    // glm::mat4 m_normalizeMatrix;
 
     std::vector<VkBuffer> m_uniformBuffers;
     std::vector<VkDeviceMemory> m_uniformBuffersMemory;
@@ -268,12 +260,6 @@ private:
             pModel = nullptr;
         }
         m_models.clear();
-
-        //vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
-        //vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
-
-        //vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
-        //vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
@@ -682,10 +668,17 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(ModelPushConstants);
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
@@ -1121,6 +1114,10 @@ private:
 
         vkCmdBindIndexBuffer(commandBuffer, m_models[0]->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
+        ModelPushConstants constants{};
+        constants.normailzeMatrix = m_models[0]->NormalizeMatrix();
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ModelPushConstants), &constants);
+
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_models[0]->Indices()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
@@ -1151,7 +1148,7 @@ private:
         }
     }
 
-    void updateUniformBuffer(uint32_t currentImage) {
+    void updateUniformBuffer(uint32_t currentImage, int modelIndex) {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -1159,8 +1156,7 @@ private:
 
         UniformBufferObject ubo{};
         ubo.model = glm::mat4(1.0);
-        //ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 1.0f));
-        ubo.model = ubo.model * m_models[0]->NormalizeMatrix();
+        ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
                                glm::vec3(0.0f, 0.0f, 0.0f),
                                glm::vec3(0.0f, 0.0f, 1.0f));
@@ -1184,7 +1180,7 @@ private:
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
-        updateUniformBuffer(m_currentFrame);
+        updateUniformBuffer(m_currentFrame, 0);
 
         vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
 
