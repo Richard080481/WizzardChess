@@ -30,14 +30,15 @@ const bool enableValidationLayers = true;
 
 const std::string modelPaths[] =
 {
-    "models/simplify_Bishop.obj",
-    "models/simplify_King.obj",
-    "models/simplify_Knight.obj",
-    "models/simplify_Rook.obj",
-    "models/simplify_Pawn.obj",
-    "models/simplify_Queen.obj"
+    "models/Cube.obj"
+    //"models/simplify_Bishop.obj",
+    //"models/simplify_King.obj",
+    //"models/simplify_Knight.obj",
+    //"models/simplify_Rook.obj",
+    //"models/simplify_Pawn.obj",
+    //"models/simplify_Queen.obj"
 };
-const std::string TEXTURE_PATH = "textures/oak.jpg";
+const std::string TEXTURE_PATH = "textures/ChessBoardWood.jpg";
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 view;
@@ -885,7 +886,7 @@ void WizzardChess::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t wi
 void WizzardChess::loadModel()
 {
     constexpr int numModels = ARRAY_SIZE(modelPaths);
-    constexpr float x_offset = 1.0f;
+    constexpr float x_offset = 0.0f;
     constexpr float theta = 360.0f / numModels;
     float maxScale = 0.0f;
     for (int i = 0; i < numModels; i++)
@@ -1052,7 +1053,7 @@ void WizzardChess::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
     for(auto& model : m_models)
     {
         constants.model = glm::mat4(1.0);
-        constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(2.0f, 3.0f, 5.0f));
         constants.model = constants.model * model->ModelMatrix();
 
         VkBuffer vertexBuffers[] = { model->VertexBuffer() };
