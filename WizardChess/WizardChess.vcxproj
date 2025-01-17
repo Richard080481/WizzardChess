@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Model.cpp" />
+    <ClCompile Include="WizzardChess.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\shader.frag">
@@ -35,9 +36,11 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="main.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Types.h" />
     <ClInclude Include="VulkanHelper.h" />
+    <ClInclude Include="WizzardChess.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
