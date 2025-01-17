@@ -1,7 +1,6 @@
 #version 450
 
 layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
     mat4 view;
     mat4 proj;
 } ubo;
@@ -16,11 +15,12 @@ layout(location = 1) out vec2 fragTexCoord;
 //push constants block
 layout( push_constant ) uniform constants
 {
+    mat4 model;
 	mat4 normailzeMatrix;
 } pushConstant;
 
 void main() {
-    gl_Position = ubo.proj * ubo.view * ubo.model * pushConstant.normailzeMatrix * vec4(inPosition, 1.0);
+    gl_Position = ubo.proj * ubo.view * pushConstant.model * pushConstant.normailzeMatrix * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;
 }

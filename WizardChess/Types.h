@@ -55,6 +55,7 @@ struct Vertex
 };
 
 struct ModelPushConstants {
+    glm::mat4 model;
     glm::mat4 normailzeMatrix;
 };
 

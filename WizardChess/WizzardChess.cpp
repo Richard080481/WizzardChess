@@ -33,7 +33,6 @@ const std::string modelPaths[] =
 const std::string TEXTURE_PATH = "textures/oak.jpg";
 
 struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
@@ -1024,8 +1023,14 @@ void WizzardChess::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
 
     vkCmdBindIndexBuffer(commandBuffer, m_models[0]->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
     ModelPushConstants constants{};
     constants.normailzeMatrix = m_models[0]->NormalizeMatrix();
+    constants.model = glm::mat4(1.0);
+    constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 1.0f));
     vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ModelPushConstants), &constants);
 
     vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_models[0]->Indices()), 1, 0, 0, 0);
@@ -1059,14 +1064,7 @@ void WizzardChess::createSyncObjects() {
 }
 
 void WizzardChess::updateUniformBuffer(uint32_t currentImage, int modelIndex) {
-    static auto startTime = std::chrono::high_resolution_clock::now();
-
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
     UniformBufferObject ubo{};
-    ubo.model = glm::mat4(1.0);
-    ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 1.0f));
     ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
         glm::vec3(0.0f, 0.0f, 0.0f),
         glm::vec3(0.0f, 0.0f, 1.0f));
