@@ -61,6 +61,18 @@ public:
         m_modelMatrix = glm::rotate(m_modelMatrix, glm::radians(degree), axis);
     }
 
+    void RescaleNormalizeMatrix(float scale)
+    {
+        m_normalizeMatrix = glm::scale(m_normalizeMatrix, glm::vec3(MaxScale()));
+        m_normalizeMatrix = glm::scale(m_normalizeMatrix, glm::vec3(scale));
+    }
+
+    float MaxScale()
+    {
+        return std::max(std::max((m_boundaries[1] - m_boundaries[0]),
+                                 (m_boundaries[3] - m_boundaries[2])),
+                        (m_boundaries[5] - m_boundaries[4])) / 2;
+    }
 
 private:
     void createIndexBuffer();

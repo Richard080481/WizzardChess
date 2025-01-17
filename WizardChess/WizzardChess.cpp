@@ -885,9 +885,9 @@ void WizzardChess::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t wi
 void WizzardChess::loadModel()
 {
     constexpr int numModels = ARRAY_SIZE(modelPaths);
-    constexpr float x_offset = 1.5f;
+    constexpr float x_offset = 1.0f;
     constexpr float theta = 360.0f / numModels;
-
+    float maxScale = 0.0f;
     for (int i = 0; i < numModels; i++)
     {
         Model* pModel = new Model(m_physicalDevice, m_device, m_graphicsQueue, m_commandPool, modelPaths[i]);
@@ -898,7 +898,14 @@ void WizzardChess::loadModel()
         ///@note Originally the model was along z-axis.
         ///      Rotate -90 degree along x-axis to make it pointing to the y-axis.
         pModel->Rotate(-90.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+
+        maxScale = std::max(maxScale, pModel->MaxScale());
         m_models.push_back(pModel);
+    }
+
+    for (auto& pModel : m_models)
+    {
+        pModel->RescaleNormalizeMatrix(1.0f / maxScale);
     }
 }
 

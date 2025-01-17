@@ -89,7 +89,6 @@ void Model::Load(std::string fileNmae)
     }
 }
 
-
 void Model::createVertexBuffer()
 {
     VkDeviceSize bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
