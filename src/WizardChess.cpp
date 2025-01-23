@@ -28,17 +28,78 @@ const bool enableValidationLayers = true;
 
 #define ARRAY_SIZE(x) (sizeof((x)) / sizeof((x)[0]))
 
-const std::string modelPaths[] =
+#ifndef MODEL_PATH
+#define MODEL_PATH "assets/models/"
+#endif // MODEL_PATH
+
+#ifndef TEXTURE_PATH
+#define TEXTURE_PATH "assets/textures/"
+#endif // TEXTURE_PATH
+
+#ifndef COMPILED_SHADER_ROOT
+#define COMPILED_SHADER_ROOT "compiled_shaders/"
+#endif // COMPILED_SHADER_ROOT
+
+enum EModel : unsigned int
 {
-    "models/Cube.obj"
-    //"models/simplify_Bishop.obj",
-    //"models/simplify_King.obj",
-    //"models/simplify_Knight.obj",
-    //"models/simplify_Rook.obj",
-    //"models/simplify_Pawn.obj",
-    //"models/simplify_Queen.obj"
+    Cube   = 0,
+    Bishop = 1,
+    King   = 2,
+    Knight = 3,
+    Rook   = 4,
+    Pawn   = 5,
+    Queen  = 6,
 };
-const std::string TEXTURE_PATH = "textures/ChessBoardWood.jpg";
+
+enum ETexture : unsigned int
+{
+    ChessBoardWood = 0,
+    Oak            = 1,
+};
+
+enum EShader : unsigned int
+{
+    Vert = 0,
+    Frag = 1,
+};
+
+static inline std::string GetModelPaths(enum EModel index)
+{
+    static constexpr char* modelFileNames[] =
+    {
+        "Cube.obj",
+        "simplify_Bishop.obj",
+        "simplify_King.obj",
+        "simplify_Knight.obj",
+        "simplify_Rook.obj",
+        "simplify_Pawn.obj",
+        "simplify_Queen.obj",
+    };
+
+    return MODEL_PATH + std::string(modelFileNames[index]);
+}
+
+static inline std::string GetTexturePaths(enum ETexture index)
+{
+    static constexpr char* textureFileNames[] =
+    {
+        "ChessBoardWood.jpg",
+        "oak.jpg",
+    };
+
+    return TEXTURE_PATH + std::string(textureFileNames[index]);
+}
+
+static inline std::string GetShaderPaths(enum EShader index)
+{
+    static constexpr char* shaderFileNames[] =
+    {
+        "vert.spv",
+        "frag.spv",
+    };
+
+    return COMPILED_SHADER_ROOT + std::string(shaderFileNames[index]);
+}
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 view;
@@ -497,8 +558,8 @@ void WizzardChess::createDescriptorSetLayout() {
 }
 
 void WizzardChess::createGraphicsPipeline() {
-    auto vertShaderCode = readFile("shaders/vert.spv");
-    auto fragShaderCode = readFile("shaders/frag.spv");
+    auto vertShaderCode = readFile(GetShaderPaths(EShader::Vert));
+    auto fragShaderCode = readFile(GetShaderPaths(EShader::Frag));
 
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -700,10 +761,11 @@ bool WizzardChess::hasStencilComponent(VkFormat format) {
 
 void WizzardChess::createTextureImage() {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    stbi_uc* pixels = stbi_load(GetTexturePaths(ETexture::ChessBoardWood).c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!pixels) {
+        assert(false);
         throw std::runtime_error("failed to load texture image!");
     }
 
@@ -885,13 +947,15 @@ void WizzardChess::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t wi
 
 void WizzardChess::loadModel()
 {
-    constexpr int numModels = ARRAY_SIZE(modelPaths);
+    constexpr EModel firstModelIndex = EModel::Cube;
+    constexpr EModel lastModelIndex = EModel::Cube;
+    constexpr int numModels = lastModelIndex - firstModelIndex + 1;
     constexpr float x_offset = 0.0f;
     constexpr float theta = 360.0f / numModels;
     float maxScale = 0.0f;
-    for (int i = 0; i < numModels; i++)
+    for (int i = firstModelIndex; i <= lastModelIndex; i++)
     {
-        Model* pModel = new Model(m_physicalDevice, m_device, m_graphicsQueue, m_commandPool, modelPaths[i]);
+        Model* pModel = new Model(m_physicalDevice, m_device, m_graphicsQueue, m_commandPool, GetModelPaths(static_cast<EModel>(i)));
 
         pModel->Rotate(theta * i, glm::vec3(0.0f, 1.0f, 0.0f));
         pModel->Translate(glm::vec3(x_offset, 0.0f, 0.0f));
@@ -1362,6 +1426,7 @@ std::vector<char> WizzardChess::readFile(const std::string& filename)
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
+        assert(false);
         throw std::runtime_error("failed to open file!");
     }
 

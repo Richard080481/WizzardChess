@@ -1,4 +1,2 @@
 .vs
-WizardChess/shaders/*.spv
-WizardChess/x64/
-x64
+build
