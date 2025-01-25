@@ -19,37 +19,34 @@
 class Model
 {
 public:
-    Model(
-        VkPhysicalDevice phyicalDevice,
-        VkDevice device,
-        VkQueue queue,
-        VkCommandPool commandPool,
-        std::string fileName) :
-        m_physicalDevice(phyicalDevice),
-        m_device(device),
-        m_queue(queue),
-        m_commandPool(commandPool),
-        m_modelMatrix(glm::mat4(1.0f))
+    Model(std::string fileName)
     {
         Load(fileName);
-        createVertexBuffer();
-        createIndexBuffer();
     }
 
-    ~Model()
-    {
-        vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
-        vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
+    ~Model();
 
-        vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
-        vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
-    }
-
-    VkBuffer  VertexBuffer()    const { return m_vertexBuffer; }
-    VkBuffer  IndexBuffer()     const { return m_indexBuffer; }
     size_t    Indices()         const { return m_indices.size(); }
     glm::mat4 NormalizeMatrix() const { return m_normalizeMatrix; }
     glm::mat4 ModelMatrix()     const { return m_modelMatrix; }
+
+    VkBuffer VertexBuffer()
+    {
+        if (m_vertexBuffer == VK_NULL_HANDLE)
+        {
+            CreateVertexBuffer();
+        }
+        return m_vertexBuffer;
+    }
+
+    VkBuffer IndexBuffer()
+    {
+        if (m_indexBuffer == VK_NULL_HANDLE)
+        {
+            CreateIndexBuffer();
+        }
+        return m_indexBuffer;
+    }
 
     void Translate(glm::vec3 tranlation)
     {
@@ -75,25 +72,20 @@ public:
     }
 
 private:
-    void createIndexBuffer();
-    void createVertexBuffer();
+    void CreateIndexBuffer();
+    void CreateVertexBuffer();
     void Load(std::string fileName);
 
-    glm::mat4 m_modelMatrix;
-    std::vector<Vertex> m_vertices;
-    std::vector<uint32_t> m_indices;
-    float m_boundaries[6] = {};
-    glm::mat4 m_normalizeMatrix;
+    glm::mat4               m_modelMatrix = glm::mat4(1.0f);
+    std::vector<Vertex>     m_vertices;
+    std::vector<uint32_t>   m_indices;
+    float                   m_boundaries[6] = {};
+    glm::mat4               m_normalizeMatrix = glm::mat4(1.0f);
 
-    VkPhysicalDevice m_physicalDevice;
-    VkDevice m_device;
-    VkQueue m_queue;
-    VkCommandPool m_commandPool;
-
-    VkBuffer m_vertexBuffer;
-    VkDeviceMemory m_vertexBufferMemory;
-    VkBuffer m_indexBuffer;
-    VkDeviceMemory m_indexBufferMemory;
+    VkBuffer        m_vertexBuffer       = VK_NULL_HANDLE;
+    VkDeviceMemory  m_vertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer        m_indexBuffer        = VK_NULL_HANDLE;
+    VkDeviceMemory  m_indexBufferMemory  = VK_NULL_HANDLE;
 };
 
 #endif // __MODEL_H__

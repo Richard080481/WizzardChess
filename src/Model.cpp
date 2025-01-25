@@ -4,9 +4,19 @@
 #include "Types.h"
 #include "Model.h"
 #include "VulkanHelper.h"
+#include "VulkanDeviceManager.h"
 
 #include <unordered_map>
 #include <cmath>
+
+Model::~Model()
+{
+    vkDestroyBuffer(VK.Device(), m_indexBuffer, nullptr);
+    vkFreeMemory(VK.Device(), m_indexBufferMemory, nullptr);
+
+    vkDestroyBuffer(VK.Device(), m_vertexBuffer, nullptr);
+    vkFreeMemory(VK.Device(), m_vertexBufferMemory, nullptr);
+}
 
 void Model::Load(std::string fileNmae)
 {
@@ -15,11 +25,10 @@ void Model::Load(std::string fileNmae)
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, fileNmae.c_str())) {
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, fileNmae.c_str()))
+    {
         throw std::runtime_error(warn + err);
     }
-
-    //std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
     m_boundaries[0] = attrib.vertices[0];
     m_boundaries[1] = attrib.vertices[0];
@@ -28,11 +37,14 @@ void Model::Load(std::string fileNmae)
     m_boundaries[4] = attrib.vertices[2];
     m_boundaries[5] = attrib.vertices[2];
 
-    for (const auto& shape : shapes) {
-        for (const auto& index : shape.mesh.indices) {
+    for (const auto& shape : shapes)
+    {
+        for (const auto& index : shape.mesh.indices)
+        {
             Vertex vertex{};
 
-            vertex.pos = {
+            vertex.pos =
+            {
                 attrib.vertices[3 * index.vertex_index + 0],
                 attrib.vertices[3 * index.vertex_index + 1],
                 attrib.vertices[3 * index.vertex_index + 2]
@@ -47,7 +59,8 @@ void Model::Load(std::string fileNmae)
 
             if (index.texcoord_index != -1)
             {
-                vertex.texCoord = {
+                vertex.texCoord =
+                {
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
@@ -55,19 +68,8 @@ void Model::Load(std::string fileNmae)
 
             vertex.color = { vertex.pos[0], vertex.pos[1], vertex.pos[2] };
 
-#define USE_UNIQUE_VERTICES 0
-#if 0
-            if (uniqueVertices.count(vertex) == 0) {
-                uniqueVertices[vertex] = static_cast<uint32_t>(m_vertices.size());
-                m_vertices.push_back(vertex);
-            }
-
-            m_indices.push_back(uniqueVertices[vertex]);
-#else
-
             m_indices.push_back(m_vertices.size());
             m_vertices.push_back(vertex);
-#endif
         }
     }
 
@@ -89,44 +91,74 @@ void Model::Load(std::string fileNmae)
     }
 }
 
-void Model::createVertexBuffer()
+void Model::CreateVertexBuffer()
 {
+    // Calculate the size of the buffer required to store all vertex data
     VkDeviceSize bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
 
+    // Staging buffer and its memory to upload data from the host (CPU) to the device (GPU)
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
-    createBuffer(m_device, m_physicalDevice, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+    CreateBuffer(bufferSize,
+                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer,
+                 stagingBufferMemory);
 
+    // Map the staging buffer memory to CPU-accessible address space and copy vertex data
     void* data;
-    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    VkDevice device = VK.Device();
+    vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
     memcpy(data, m_vertices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_device, stagingBufferMemory);
+    vkUnmapMemory(device, stagingBufferMemory);
 
-    createBuffer(m_device, m_physicalDevice, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_vertexBuffer, m_vertexBufferMemory);
+    // Create a GPU-local buffer for vertex data
+    CreateBuffer(bufferSize,
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 m_vertexBuffer,
+                 m_vertexBufferMemory);
 
-    copyBuffer(m_device, m_queue, m_commandPool, stagingBuffer, m_vertexBuffer, bufferSize);
+    // Copy data from the staging buffer to the GPU-local vertex buffer
+    CopyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
 
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+    // Clean up the staging buffer and its memory after data has been transferred
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
 
-void Model::createIndexBuffer()
+void Model::CreateIndexBuffer()
 {
+    // Calculate the size of the buffer required to store all index data
     VkDeviceSize bufferSize = sizeof(m_indices[0]) * m_indices.size();
 
+    // Staging buffer and its memory to upload data from the host (CPU) to the device (GPU)
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
-    createBuffer(m_device, m_physicalDevice, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+    CreateBuffer(bufferSize,
+                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer,
+                 stagingBufferMemory);
 
+    // Map the staging buffer memory to CPU-accessible address space and copy index data
     void* data;
-    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    VkDevice device = VK.Device();
+    vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
     memcpy(data, m_indices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_device, stagingBufferMemory);
+    vkUnmapMemory(device, stagingBufferMemory);
 
-    createBuffer(m_device, m_physicalDevice, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_indexBuffer, m_indexBufferMemory);
+    // Create a GPU-local buffer for index data
+    CreateBuffer(bufferSize,
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                 m_indexBuffer,
+                 m_indexBufferMemory);
 
-    copyBuffer(m_device, m_queue, m_commandPool, stagingBuffer, m_indexBuffer, bufferSize);
+    // Copy data from the staging buffer to the GPU-local index buffer
+    CopyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
 
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+    // Clean up the staging buffer and its memory after data has been transferred
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
 }

@@ -12,6 +12,8 @@ set(SOURCE_FILES
     src/main.cpp
     src/Model.cpp
     src/WizardChess.cpp
+    src/VulkanDeviceManager.cpp
+    src/VulkanSurfaceManager.cpp
 )
 
 # Header files
@@ -19,7 +21,10 @@ set(HEADER_FILES
     include/main.h
     include/Model.h
     include/Types.h
+    include/Utils.h
     include/VulkanHelper.h
+    include/VulkanDeviceManager.h
+    include/VulkanSurfaceManager.h
     include/WizardChess.h
 )
 
