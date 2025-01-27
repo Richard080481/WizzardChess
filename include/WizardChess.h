@@ -10,11 +10,13 @@
 #include "Model.h"
 
 #include "VulkanSurfaceManager.h"
+#include "MemoryTracker.h"
 
 class WizzardChess {
 public:
     WizzardChess(int width, int height) : m_width(width), m_height(height) {}
-    ~WizzardChess() = default;
+    ~WizzardChess();
+
     void run();
     void SetFramebufferResized()
     {
@@ -54,7 +56,7 @@ private:
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
 
-    VkRenderPass            m_renderPass;
+    VkRenderPass            m_renderPass = VK_NULL_HANDLE;
     VkDescriptorSetLayout   m_descriptorSetLayout;
     VkPipelineLayout        m_pipelineLayout;
     VkPipeline              m_graphicsPipeline;

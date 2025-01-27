@@ -122,6 +122,15 @@ const std::vector<const char*> g_validationLayers =
     "VK_LAYER_KHRONOS_validation"
 };
 
+WizzardChess::~WizzardChess()
+{
+    delete g_pVk;
+    g_pVk = nullptr;
+
+    delete g_pMemoryTracker;
+    g_pMemoryTracker = nullptr;
+}
+
 void WizzardChess::run()
 {
     InitVulkan();
@@ -252,10 +261,6 @@ void WizzardChess::Cleanup()
         vkDestroySemaphore(device, m_imageAvailableSemaphores[i], nullptr);
         vkDestroyFence(device, m_inFlightFences[i], nullptr);
     }
-
-    VK.Destroy();
-    delete g_pVk;
-    g_pVk = nullptr;
 }
 
 void WizzardChess::RecreateSwapChain()

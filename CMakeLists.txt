@@ -12,6 +12,7 @@ set(SOURCE_FILES
     src/main.cpp
     src/Model.cpp
     src/WizardChess.cpp
+    src/MemoryTracker.cpp
     src/VulkanDeviceManager.cpp
     src/VulkanSurfaceManager.cpp
 )
@@ -22,6 +23,7 @@ set(HEADER_FILES
     include/Model.h
     include/Types.h
     include/Utils.h
+    include/MemoryTracker.h
     include/VulkanHelper.h
     include/VulkanDeviceManager.h
     include/VulkanSurfaceManager.h
@@ -49,9 +51,9 @@ add_custom_command(
 )
 
 # Add executable, including shaders to make them visible in the solution explorer
-add_executable(${PROJECT_NAME} 
-    ${SOURCE_FILES} 
-    ${HEADER_FILES} 
+add_executable(${PROJECT_NAME}
+    ${SOURCE_FILES}
+    ${HEADER_FILES}
     ${SHADER_SOURCE_FILES}
 )
 

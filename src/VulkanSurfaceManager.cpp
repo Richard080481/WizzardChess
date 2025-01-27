@@ -188,21 +188,6 @@ void VulkanSurfaceManager::CreateSwapChain()
 void VulkanSurfaceManager::DestroySwapChain()
 {
     VkDevice device = m_pDeviceManager->Device();
-    //vkDestroyImageView(device, m_depthImageView, nullptr);
-    //vkDestroyImage(device, m_depthImage, nullptr);
-    //vkFreeMemory(device, m_depthImageMemory, nullptr);
-
-    /*
-    for (auto framebuffer : m_swapChainFramebuffers)
-    {
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
-
-    for (auto imageView : m_swapChainImageViews)
-    {
-        vkDestroyImageView(device, imageView, nullptr);
-    }
-    */
 
     vkDestroySwapchainKHR(device, m_swapChain, nullptr);
     m_swapChain = VK_NULL_HANDLE;

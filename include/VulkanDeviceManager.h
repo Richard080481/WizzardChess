@@ -31,7 +31,7 @@ class VulkanDeviceManager
 {
 public:
     VulkanDeviceManager() = default;
-    ~VulkanDeviceManager() = default;
+    ~VulkanDeviceManager();
 
     void Destroy();
 

@@ -1,14 +1,20 @@
 #include "VulkanDeviceManager.h"
+#include "MemoryTracker.h"
 
 #include <set>
 
 VulkanDeviceManager* g_pVk = nullptr;
 
+VulkanDeviceManager::~VulkanDeviceManager()
+{
+    Destroy();
+}
+
 void VulkanDeviceManager::DestroyValidationLayerNames()
 {
     for (int i = 0; i < m_validationLayers.size(); i++)
     {
-        free(const_cast<char*>(m_validationLayers[i]));
+        FREE(const_cast<char*>(m_validationLayers[i]));
     }
     m_validationLayers.clear();
 }
@@ -29,7 +35,7 @@ void VulkanDeviceManager::EnableValidationLayers(
         for (const auto& validationLayerStr : *pValidationLayers)
         {
             int size = strlen(validationLayerStr) + 1; // null-terminated char array
-            char* layerName = static_cast<char*>(malloc(sizeof(char) * size));
+            char* layerName = static_cast<char*>(MALLOC(sizeof(char) * size));
             assert(layerName != nullptr);
             if (layerName != nullptr)
             {
@@ -44,7 +50,7 @@ void VulkanDeviceManager::DestroyDeviceExtensionNames()
 {
     for (int i = 0; i < m_deviceExtensions.size(); i++)
     {
-        free(const_cast<char*>(m_deviceExtensions[i]));
+        FREE(const_cast<char*>(m_deviceExtensions[i]));
     }
     m_deviceExtensions.clear();
 }
@@ -60,7 +66,7 @@ void VulkanDeviceManager::EnableDeviceExtensions(const std::vector<const char*>*
         for (const auto& deviceExtensionStr : *pDeviceExtensions)
         {
             int size = strlen(deviceExtensionStr) + 1; // null-terminated char array
-            char* extensionName = static_cast<char*>(malloc(sizeof(char) * size));
+            char* extensionName = static_cast<char*>(MALLOC(sizeof(char) * size));
             assert(extensionName != nullptr);
             if (extensionName != nullptr)
             {
@@ -419,6 +425,8 @@ void VulkanDeviceManager::Destroy()
     DestroyCommandPool();
 
     DestroyLogicalDevice();
+
+    DestroyDeviceExtensionNames();
 
     glfwDestroyWindow(m_pSurfaceManager->Window());
 
