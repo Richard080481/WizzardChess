@@ -146,47 +146,81 @@ static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
 
 void WizzardChess::InitVulkan()
 {
+    // Create a VulkanDeviceManager object to manage Vulkan-specific operations.
     g_pVk = new VulkanDeviceManager();
 
-    ///@note GLFW needs to be initialized before the Vulkan instance is created.
-    ///      GLFW performs certain internal setups, including configuring platform-specific windowing and Vulkan extensions.
+    ///@note GLFW needs to be initialized before creating the Vulkan instance.
+    ///      This ensures GLFW performs its internal setups, including platform-specific windowing
+    ///      and registering Vulkan extensions required for rendering.
     VK.CreateGlfwWindow(m_width, m_height);
 
-    // Register validation layer names before create instance.
+    // Enable validation layers for debugging and error checking (if enabled).
+    // This registers the list of validation layers that will be used.
     VK.EnableValidationLayers(enableValidationLayers, &g_validationLayers);
 
-    // Create Vulkan instance.
+    // Create the Vulkan instance, which acts as the foundation for all Vulkan operations.
     VK.CreateInstance();
 
-    ///@note To make sure physical device supports swap chain, create surface before selecting physical device.
+    ///@note The surface must be created before selecting a physical device.
+    ///      This ensures the selected device supports the swap chain, which is essential for rendering.
     VK.CreateSurface();
 
-    // Register device extensions before selecting physical devices.
+    // Enable device extensions (e.g., swap chain support) before picking the physical device.
     VK.EnableDeviceExtensions(&g_deviceExtensions);
 
+    // Select an appropriate physical device (GPU) that meets the application's requirements.
     VK.PickPhysicalDevice();
 
+    // Create a logical device to interface with the selected physical device.
     VK.CreateLogicalDevice();
 
+    // Set up the swap chain, which handles the presentation of rendered images to the window.
     VK.CreateSwapChain();
 
+    // Create a command pool, which manages the memory for command buffers.
     VK.CreateCommandPool();
 
-    m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    // Allocate command buffers from the command pool for recording rendering commands.
+    m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT); // Resize to match the number of frames in flight.
     VK.CreateCommandBuffers(m_commandBuffers.data(), m_commandBuffers.size());
 
+    // Create the render pass, defining how rendering operations interact with framebuffers.
     CreateRenderPass();
+
+    // Set up the descriptor set layout, which specifies how shaders access resources like uniforms and textures.
     CreateDescriptorSetLayout();
+
+    // Create the graphics pipeline, which configures shaders, input assembly, viewport, and other rendering states.
     CreateGraphicsPipeline();
+
+    // Create resources for depth buffering, allowing proper handling of 3D object occlusion.
     CreateDepthResources();
+
+    // Create framebuffers, which represent the render targets for each swap chain image.
     CreateFramebuffers();
+
+    // Load and create a texture image from file.
     CreateTextureImage();
+
+    // Create a Vulkan image view for the texture, allowing shaders to sample it.
     CreateTextureImageView();
+
+    // Create a sampler for the texture, which defines how the texture is sampled in shaders.
     CreateTextureSampler();
+
+    // Load the 3D model data into memory.
     LoadModel();
+
+    // Create uniform buffers to hold per-frame data like transformation matrices.
     CreateUniformBuffers();
+
+    // Create a descriptor pool, which allocates resources for descriptor sets.
     CreateDescriptorPool();
+
+    // Allocate and configure descriptor sets, which link shaders to resources like textures and buffers.
     CreateDescriptorSets();
+
+    // Create synchronization objects (semaphores and fences) to manage rendering and presentation.
     CreateSyncObjects();
 }
 
@@ -667,8 +701,8 @@ void WizzardChess::CreateImage(uint32_t width, uint32_t height, VkFormat format,
     vkGetImageMemoryRequirements(device, image, &memRequirements);
 
     VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memRequirements.size;
     allocInfo.memoryTypeIndex = FindMemoryType(VK.PhysicalDevice(), memRequirements.memoryTypeBits, properties);
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
@@ -735,11 +769,11 @@ void WizzardChess::TransitionImageLayout(VkImage image, VkFormat format, VkImage
 void WizzardChess::LoadModel()
 {
     constexpr EModel firstModelIndex = EModel::Cube;
-    constexpr EModel lastModelIndex = EModel::Cube;
-    constexpr int numModels = lastModelIndex - firstModelIndex + 1;
-    constexpr float x_offset = 0.0f;
-    constexpr float theta = 360.0f / numModels;
-    float maxScale = 0.0f;
+    constexpr EModel lastModelIndex  = EModel::Cube;
+    constexpr int    numModels       = lastModelIndex - firstModelIndex + 1;
+    constexpr float  x_offset        = 0.0f;
+    constexpr float  theta           = 360.0f / numModels;
+    float            maxScale        = 0.0f;
     for (int i = firstModelIndex; i <= lastModelIndex; i++)
     {
         Model* pModel = new Model(GetModelPaths(static_cast<EModel>(i)));
@@ -748,7 +782,7 @@ void WizzardChess::LoadModel()
         pModel->Translate(glm::vec3(x_offset, 0.0f, 0.0f));
 
         ///@note Originally the model was along z-axis.
-        ///      Rotate -90 degree along x-axis to make it pointing to the y-axis.
+        ///      Rotate -90 degree along x-axis to make it point to the y-axis.
         pModel->Rotate(-90.0f, glm::vec3(1.0f, 0.0f, 0.0f));
 
         maxScale = std::max(maxScale, pModel->MaxScale());
@@ -848,6 +882,7 @@ void WizzardChess::CreateDescriptorSets()
 
 void WizzardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
 {
+    // Begin recording commands into the command buffer.
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -856,68 +891,86 @@ void WizzardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
         throw std::runtime_error("failed to begin recording command buffer!");
     }
 
+    // Get the current swap chain extent for setting up the render area.
     auto swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
 
+    // Configure the render pass begin info.
     VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass        = m_renderPass;
-    renderPassInfo.framebuffer       = m_swapChainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = { 0, 0 };
-    renderPassInfo.renderArea.extent = swapChainExtent;
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = m_renderPass; // The render pass to use.
+    renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex]; // Framebuffer for the current swap chain image.
+    renderPassInfo.renderArea.offset = { 0, 0 }; // Render area starts at the top-left corner.
+    renderPassInfo.renderArea.extent = swapChainExtent; // Render area size matches the swap chain extent.
 
+    // Clear values for the color and depth buffer.
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color        = { {0.25f, 0.0f, 0.0f, 1.0f} };
-    clearValues[1].depthStencil = { 1.0f, 0 };
+    clearValues[0].color = { {0.25f, 0.0f, 0.0f, 1.0f} }; // Clear color to a dark red.
+    clearValues[1].depthStencil = { 1.0f, 0 }; // Clear depth to 1.0 and stencil to 0.
 
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues    = clearValues.data();
+    renderPassInfo.pClearValues = clearValues.data();
 
+    // Begin the render pass, specifying that commands will be submitted inline.
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
+    // Bind the graphics pipeline to the command buffer.
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
+    // Set the viewport, defining the dimensions and depth range of the render area.
     VkViewport viewport{};
-    viewport.x        = 0.0f;
-    viewport.y        = 0.0f;
-    viewport.width    = (float)swapChainExtent.width;
-    viewport.height   = (float)swapChainExtent.height;
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)swapChainExtent.width;
+    viewport.height = (float)swapChainExtent.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
+    // Set the scissor rectangle to restrict drawing to the swap chain extent.
     VkRect2D scissor{};
     scissor.offset = { 0, 0 };
     scissor.extent = swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+    // Bind the descriptor set for the current frame, providing shader resources like textures and uniform buffers.
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[m_currentFrame], 0, nullptr);
 
+    // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+    // Create push constants for passing small amounts of dynamic data to shaders.
     ModelPushConstants constants{};
 
-    for(auto& model : m_models)
+    // Render each model in the scene.
+    for (auto& model : m_models)
     {
+        // Initialize the model matrix and apply dynamic rotation.
         constants.model = glm::mat4(1.0);
         constants.model = glm::rotate(constants.model, time * glm::radians(90.0f), glm::vec3(2.0f, 3.0f, 5.0f));
         constants.model = constants.model * model->ModelMatrix();
 
+        // Bind the vertex buffer for the current model.
         VkBuffer vertexBuffers[] = { model->VertexBuffer() };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
+        // Bind the index buffer for the current model.
         vkCmdBindIndexBuffer(commandBuffer, model->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
+        // Pass the normalization matrix to the shaders.
         constants.normailzeMatrix = model->NormalizeMatrix();
         vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ModelPushConstants), &constants);
 
+        // Issue a draw command for the indexed geometry of the model.
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(model->Indices()), 1, 0, 0, 0);
     }
 
+    // End the render pass.
     vkCmdEndRenderPass(commandBuffer);
 
+    // Finalize recording the command buffer.
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
     {
         throw std::runtime_error("failed to record command buffer!");
