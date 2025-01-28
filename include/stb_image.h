@@ -129,6 +129,11 @@ RECENT REVISION HISTORY:
 #ifndef STBI_INCLUDE_STB_IMAGE_H
 #define STBI_INCLUDE_STB_IMAGE_H
 
+#pragma warning (push)
+
+// C26819: Unannotated fallthrough between switch labels (es.78).
+#pragma warning (disable:26819)
+
 // DOCUMENTATION
 //
 // Limitations:
@@ -864,7 +869,7 @@ static void stbi__stdio_skip(void *user, int n)
 
 static int stbi__stdio_eof(void *user)
 {
-   return feof((FILE*) user) || ferror((FILE *) user);
+   return (feof((FILE*) user) != 0) || (ferror((FILE *) user) != 0);
 }
 
 static stbi_io_callbacks stbi__stdio_callbacks =
@@ -1023,23 +1028,23 @@ static int stbi__mul2sizes_valid(int a, int b)
 // returns 1 if "a*b + add" has no negative terms/factors and doesn't overflow
 static int stbi__mad2sizes_valid(int a, int b, int add)
 {
-   return stbi__mul2sizes_valid(a, b) && stbi__addsizes_valid(a*b, add);
+   return (stbi__mul2sizes_valid(a, b) != 0) && (stbi__addsizes_valid(a*b, add) != 0);
 }
 #endif
 
 // returns 1 if "a*b*c + add" has no negative terms/factors and doesn't overflow
 static int stbi__mad3sizes_valid(int a, int b, int c, int add)
 {
-   return stbi__mul2sizes_valid(a, b) && stbi__mul2sizes_valid(a*b, c) &&
-      stbi__addsizes_valid(a*b*c, add);
+   return (stbi__mul2sizes_valid(a, b) != 0) && (stbi__mul2sizes_valid(a*b, c) != 0) &&
+          (stbi__addsizes_valid(a*b*c, add) != 0);
 }
 
 // returns 1 if "a*b*c*d + add" has no negative terms/factors and doesn't overflow
 #if !defined(STBI_NO_LINEAR) || !defined(STBI_NO_HDR) || !defined(STBI_NO_PNM)
 static int stbi__mad4sizes_valid(int a, int b, int c, int d, int add)
 {
-   return stbi__mul2sizes_valid(a, b) && stbi__mul2sizes_valid(a*b, c) &&
-      stbi__mul2sizes_valid(a*b*c, d) && stbi__addsizes_valid(a*b*c*d, add);
+   return (stbi__mul2sizes_valid(a, b) != 0) && (stbi__mul2sizes_valid(a*b, c) != 0) &&
+          (stbi__mul2sizes_valid(a*b*c, d) != 0) && (stbi__addsizes_valid(a*b*c*d, add) != 0);
 }
 #endif
 
@@ -1322,10 +1327,10 @@ static void stbi__float_postprocess(float *result, int *x, int *y, int *comp, in
 
 #ifndef STBI_NO_STDIO
 
-#if defined(_WIN32) && defined(STBI_WINDOWS_UTF8)
-STBI_EXTERN __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *str, int cbmb, wchar_t *widestr, int cchwide);
-STBI_EXTERN __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned int cp, unsigned long flags, const wchar_t *widestr, int cchwide, char *str, int cbmb, const char *defchar, int *used_default);
-#endif
+// #if defined(_WIN32) && defined(STBI_WINDOWS_UTF8)
+// STBI_EXTERN __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *str, int cbmb, wchar_t *widestr, int cchwide);
+// STBI_EXTERN __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned int cp, unsigned long flags, const wchar_t *widestr, int cchwide, char *str, int cbmb, const char *defchar, int *used_default);
+// #endif
 
 #if defined(_WIN32) && defined(STBI_WINDOWS_UTF8)
 STBIDEF int stbi_convert_wchar_to_utf8(char *buffer, size_t bufferlen, const wchar_t* input)
@@ -5204,7 +5209,7 @@ static int stbi__parse_png_file(stbi__png *z, int scan, int req_comp)
             // initial guess for decoded data size to avoid unnecessary reallocs
             bpl = (s->img_x * z->depth + 7) / 8; // bytes per line, per component
             raw_len = bpl * s->img_y * s->img_n /* pixels */ + s->img_y /* filter mode per row */;
-            z->expanded = (stbi_uc *) stbi_zlib_decode_malloc_guesssize_headerflag((char *) z->idata, ioff, raw_len, (int *) &raw_len, !is_iphone);
+            z->expanded = (stbi_uc *) stbi_zlib_decode_malloc_guesssize_headerflag((char *) z->idata, ioff, raw_len, (int *) &raw_len, is_iphone == 0);
             if (z->expanded == NULL) return 0; // zlib should set error
             STBI_FREE(z->idata); z->idata = NULL;
             if ((req_comp == s->img_n+1 && req_comp != 3 && !pal_img_n) || has_trans)
@@ -7986,3 +7991,5 @@ ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 */
+
+#pragma warning (pop)
