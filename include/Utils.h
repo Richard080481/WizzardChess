@@ -5,6 +5,9 @@
 #include <fstream>
 #include <string>
 #include <cassert>
+#include <chrono>
+#include <thread>
+
 
 static std::vector<char> ReadFile(const std::string& filename)
 {
@@ -25,6 +28,23 @@ static std::vector<char> ReadFile(const std::string& filename)
     file.close();
 
     return buffer;
+}
+
+void LimitFPS(const int targetFps = 30)
+{
+    const int frameTimeMillisec = 1000 / targetFps;
+
+    static auto lastTime = std::chrono::high_resolution_clock::now();
+
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    int elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
+
+    if (elapsedTime < frameTimeMillisec)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(frameTimeMillisec - elapsedTime));
+    }
+
+    lastTime = std::chrono::high_resolution_clock::now();
 }
 
 #endif // __UTILS_H__
