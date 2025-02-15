@@ -12,6 +12,9 @@
 #include "VulkanSurfaceManager.h"
 #include "MemoryTracker.h"
 
+#define SHADOW_MAP_WIDTH  2048
+#define SHADOW_MAP_HEIGHT 2048
+
 enum EModelName : unsigned int
 {
     Cube   = 0,
@@ -44,8 +47,11 @@ private:
     void     CreateRenderPass();
     void     CreateDescriptorSetLayout();
     void     CreateGraphicsPipeline();
-    void     CreateFramebuffers();
+    void     CreateShadowPassGraphicsPipeline();
+    void     CreateSwapChainFramebuffers();
+    void     CreateShadowPassFramebuffers();
     void     CreateDepthResources();
+    void     CreateShadowMapResources();
     VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
     VkFormat FindDepthFormat();
     bool     HasStencilComponent(VkFormat format);
@@ -68,6 +74,7 @@ private:
     int m_height;
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
+    VkFramebuffer           m_shadowPassFramebuffer;
 
     VkRenderPass            m_renderPass           = VK_NULL_HANDLE;
     VkDescriptorSetLayout   m_descriptorSetLayout  = VK_NULL_HANDLE;
@@ -83,6 +90,17 @@ private:
     VkImageView             m_textureImageView     = VK_NULL_HANDLE;
     VkSampler               m_textureSampler       = VK_NULL_HANDLE;
 
+    const VkFormat          m_shadowMapFormat               = VK_FORMAT_D32_SFLOAT;
+    const VkExtent2D        m_shadowMapExtent               = { SHADOW_MAP_WIDTH, SHADOW_MAP_HEIGHT };
+    VkRenderPass            m_shadowRenderPass              = VK_NULL_HANDLE;
+    VkDescriptorSetLayout   m_shadowPassDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout        m_shadowPassPipelineLayout      = VK_NULL_HANDLE;
+    VkPipeline              m_shadowPassGraphicsPipeline    = VK_NULL_HANDLE;
+    VkImage                 m_shadowImage                   = VK_NULL_HANDLE;
+    VkDeviceMemory          m_shadowImageMemory             = VK_NULL_HANDLE;
+    VkImageView             m_shadowImageView               = VK_NULL_HANDLE;
+    VkSampler               m_shadowImageSampler            = VK_NULL_HANDLE;
+
     std::unordered_map<EModelName, Model*>  m_uniqueModels;
 
     std::vector<VkBuffer>       m_vsUniformBuffers;
@@ -93,8 +111,13 @@ private:
     std::vector<VkDeviceMemory> m_fsUniformBuffersMemory;
     std::vector<void*>          m_fsUniformBuffersMapped;
 
+    std::vector<VkBuffer>       m_shadowVsUniformBuffers;
+    std::vector<VkDeviceMemory> m_shadowVsUniformBuffersMemory;
+    std::vector<void*>          m_shadowVsUniformBuffersMapped;
+
     VkDescriptorPool             m_descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> m_descriptorSets;
+    std::vector<VkDescriptorSet> m_shadowPassDescriptorSets;
 
     std::vector<VkCommandBuffer> m_commandBuffers;
 
@@ -102,7 +125,7 @@ private:
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence>     m_inFlightFences;
     uint32_t                 m_currentFrame = 0;
-    uint32_t                 m_currentImage = 0;
+    uint32_t                 m_currentImage = 0;    // Which swap chain image is being rendered
 
     bool m_framebufferResized = false;
 };

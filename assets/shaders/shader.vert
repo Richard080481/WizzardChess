@@ -9,11 +9,14 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragPosition;
+layout(location = 4) out vec4 lightViewPosition;
 
 layout(binding = 0) uniform UniformBufferObjectVs
 {
     mat4 view;
+    mat4 lightView;
     mat4 proj;
+    mat4 lightProj;
 } ubo;
 
 layout(push_constant) uniform constants
@@ -30,7 +33,8 @@ layout(push_constant) uniform constants
 
 void main()
 {
-    mat4 modelView = ubo.view * pushConstant.world * pushConstant.model * pushConstant.normalizeMatrix;
+    mat4 model     = pushConstant.world * pushConstant.model * pushConstant.normalizeMatrix;
+    mat4 modelView = ubo.view * model;
 
     // Transform position
     fragPosition = vec3(modelView * vec4(inPosition, 1.0));
@@ -49,4 +53,27 @@ void main()
 
     // Texture coordinates
     fragTexCoord = inTexCoord;
+
+    // Depth bias to reduce shadow acne (self-shadowing artifacts)
+    float bias = -0.001f;
+
+    ///@note Convert X,Y value from NDC [-1, 1] to texture coordinates [0, 1].
+    ///      Since shadow map format is D32_SFLOAT, we can keep the depth value in [-1, 1].
+    ///@note Column major matrix
+    mat4 T = mat4(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.5, 0.5, bias, 1.0
+    );
+    mat4 S = mat4(
+        0.5, 0.0, 0.0, 0.0,
+        0.0, 0.5, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    );
+
+    // Light view position
+    mat4 matrixShadow = T * S * ubo.lightProj * ubo.lightView * model;
+    lightViewPosition = matrixShadow * vec4(inPosition, 1.0);
 }

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cassert>
+#include <cstdint>
 #include <chrono>
 #include <thread>
 
