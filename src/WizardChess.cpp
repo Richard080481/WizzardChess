@@ -19,6 +19,7 @@
 
 #include "Types.h"
 #include "Utils.h"
+#include "BmpUtils.h"
 #include "VulkanHelper.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSurfaceManager.h"
@@ -704,9 +705,9 @@ void WizardChess::CreateTextureImage()
 
     CreateImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_textureImage, m_textureImageMemory);
 
-    TransitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    TransitionImageLayout(VK_NULL_HANDLE, m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     CopyBufferToImage(stagingBuffer, m_textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-    TransitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    TransitionImageLayout(VK_NULL_HANDLE, m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     vkDestroyBuffer(device, stagingBuffer, nullptr);
     vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -783,9 +784,13 @@ void WizardChess::CreateImage(uint32_t width, uint32_t height, VkFormat format, 
     vkBindImageMemory(device, image, imageMemory, 0);
 }
 
-void WizardChess::TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
+void WizardChess::TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
 {
-    VkCommandBuffer commandBuffer = VK.BeginSingleTimeCommands();
+    const bool singleTimeCommand = (commandBuffer == VK_NULL_HANDLE);
+    if (singleTimeCommand)
+    {
+        commandBuffer = VK.BeginSingleTimeCommands();
+    }
 
     VkImageMemoryBarrier barrier{};
     barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -794,46 +799,73 @@ void WizardChess::TransitionImageLayout(VkImage image, VkFormat format, VkImageL
     barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
     barrier.image                           = image;
-    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask     = (format == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel   = 0;
     barrier.subresourceRange.levelCount     = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount     = 1;
 
-    VkPipelineStageFlags sourceStage;
-    VkPipelineStageFlags destinationStage;
-
-    if ((oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) && (newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    auto GetAccessMaskAndStageFromLayout = [](const VkImageLayout layout, VkAccessFlags* pAccessMask, VkPipelineStageFlags* pStage)
     {
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        switch (layout)
+        {
+            case VK_IMAGE_LAYOUT_UNDEFINED:
+                *pAccessMask = 0;
+                *pStage      = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+                break;
 
-        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    }
-    else if ((oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) && (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
-    {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+                *pAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                *pStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
+                break;
 
-        sourceStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    else
-    {
-        throw std::invalid_argument("unsupported layout transition!");
-    }
+            case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+                *pAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                *pStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
+                break;
+
+            case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+                *pAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                *pStage      = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+                break;
+
+            case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+                *pAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                *pStage      = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+                break;
+
+            case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: // intentionally fallthrough
+            case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+                *pAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                *pStage      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                break;
+
+            default:
+                assert(false);
+                throw std::invalid_argument("unsupported layout transition!");
+                break;
+        }
+    };
+
+    VkPipelineStageFlags srcStage;
+    VkPipelineStageFlags dstStage;
+
+    GetAccessMaskAndStageFromLayout(oldLayout, &barrier.srcAccessMask, &srcStage);
+    GetAccessMaskAndStageFromLayout(newLayout, &barrier.dstAccessMask, &dstStage);
 
     vkCmdPipelineBarrier(
         commandBuffer,
-        sourceStage, destinationStage,
+        srcStage, dstStage,
         0,
         0, nullptr,
         0, nullptr,
         1, &barrier
     );
 
-    VK.EndSingleTimeCommands(commandBuffer);
+    if (singleTimeCommand)
+    {
+        VK.EndSingleTimeCommands(commandBuffer);
+    }
 }
 
 void WizardChess::LoadModel()
@@ -1057,7 +1089,7 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
     // Bind the descriptor set for the current frame, providing shader resources like textures and uniform buffers.
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[m_currentFrame], 0, nullptr);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[m_currentImage], 0, nullptr);
 
     // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
@@ -1075,24 +1107,24 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     pushConstants.vs.world = glm::translate(pushConstants.vs.world, glm::vec3(-3.5, 0, 3.5));
 
     auto RecordDrawModel = [commandBuffer=commandBuffer, pipelineLayout=m_pipelineLayout](const ModelPushConstants* pPushConstants, Model* pModel)
-    {
-        // Bind the vertex buffer for the current model.
-        VkBuffer vertexBuffers[] = { pModel->VertexBuffer() };
-        VkDeviceSize offsets[] = { 0 };
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        {
+            // Bind the vertex buffer for the current model.
+            VkBuffer vertexBuffers[] = { pModel->VertexBuffer() };
+            VkDeviceSize offsets[] = { 0 };
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        // Bind the index buffer for the current model.
-        vkCmdBindIndexBuffer(commandBuffer, pModel->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            // Bind the index buffer for the current model.
+            vkCmdBindIndexBuffer(commandBuffer, pModel->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-        // Pass the VS push constant to the vertex shader.
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, offsetof(ModelPushConstants, vs), sizeof(ModelPushConstants::ModelVsPushConstants), &pPushConstants->vs);
+            // Pass the VS push constant to the vertex shader.
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, offsetof(ModelPushConstants, vs), sizeof(ModelPushConstants::ModelVsPushConstants), &pPushConstants->vs);
 
-        // Pass the FS push constant to the fragment shader.
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, offsetof(ModelPushConstants, fs), sizeof(ModelPushConstants::ModelFsPushConstants), &pPushConstants->fs);
+            // Pass the FS push constant to the fragment shader.
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, offsetof(ModelPushConstants, fs), sizeof(ModelPushConstants::ModelFsPushConstants), &pPushConstants->fs);
 
-        // Issue a draw command for the indexed geometry of the model.
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(pModel->Indices()), 1, 0, 0, 0);
-    };
+            // Issue a draw command for the indexed geometry of the model.
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(pModel->Indices()), 1, 0, 0, 0);
+        };
 
     // Render each chess piece in the scene.
     for (const auto& chessPiece : chessPieces)
@@ -1186,14 +1218,90 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage, int modelIndex)
     }
 }
 
+void WizardChess::SaveImageAsBMP(VkDevice device, VkImage image, VkFormat format, VkImageLayout oldLayout, int width, int height, std::string fileName)
+{
+    vkDeviceWaitIdle(VK.Device());
+
+    VkImage stagingImage = image;
+    VkDeviceMemory stagingImageMemory = VK_NULL_HANDLE;
+
+    // 1. Create a staging buffer
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    CreateBuffer(width * height * sizeof(float),
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer,
+                 stagingBufferMemory);
+
+    // 2. Transition image to transfer source layout
+    TransitionImageLayout(VK_NULL_HANDLE, image, format, oldLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    // 3. Copy buffer to staging buffer
+    CopyImageToBuffer(stagingImage,
+                      stagingBuffer,
+                      (format == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                      width,
+                      height);
+
+    // 4. Map memory and normalize depth values
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
+
+    std::vector<uint8_t> bmpData;
+
+    bool isGrayscale = false;
+
+    if (format == VK_FORMAT_D32_SFLOAT)
+    {
+        bmpData.resize(width * height);
+        isGrayscale = true;
+        float* depthData = (float*)data;
+
+        for (int i = 0; i < width * height; i++)
+        {
+            bmpData[i] = static_cast<uint8_t>(depthData[i] * 255.0f); // Normalize
+        }
+    }
+    else if (format == VK_FORMAT_B8G8R8A8_SRGB)
+    {
+        bmpData.resize(width * height * 4);
+        memcpy(bmpData.data(), data, width * height * 4);
+    }
+    else
+    {
+        assert(false);
+    }
+
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    // 5. Save as BMP
+    SaveBMP(fileName, bmpData, width, height, isGrayscale);
+
+    // Cleanup
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+    if (stagingImage != image)
+    {
+        vkDestroyImage(device, stagingImage, nullptr);
+        vkFreeMemory(device, stagingImageMemory, nullptr);
+    }
+
+    // 6. Transition image from transfer source layout back to old layout
+    TransitionImageLayout(VK_NULL_HANDLE, image, format, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, oldLayout);
+
+    vkDeviceWaitIdle(VK.Device());
+}
+
 void WizardChess::DrawFrame()
 {
-    vkWaitForFences(VK.Device(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+    vkWaitForFences(VK.Device(), 1, &m_inFlightFences[m_currentImage], VK_TRUE, UINT64_MAX);
 
     VkSwapchainKHR swapChain = VK.SurfaceManager()->SwapChain();
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(VK.Device(), swapChain, UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+    VkResult result = vkAcquireNextImageKHR(VK.Device(), swapChain, UINT64_MAX, m_imageAvailableSemaphores[m_currentImage], VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
@@ -1205,32 +1313,32 @@ void WizardChess::DrawFrame()
         throw std::runtime_error("failed to acquire swap chain image!");
     }
 
-    UpdateUniformBuffer(m_currentFrame, 0);
+    UpdateUniformBuffer(m_currentImage, 0);
 
-    vkResetFences(VK.Device(), 1, &m_inFlightFences[m_currentFrame]);
+    vkResetFences(VK.Device(), 1, &m_inFlightFences[m_currentImage]);
 
-    vkResetCommandBuffer(m_commandBuffers[m_currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
-    RecordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex);
+    vkResetCommandBuffer(m_commandBuffers[m_currentImage], /*VkCommandBufferResetFlagBits*/ 0);
+    RecordCommandBuffer(m_commandBuffers[m_currentImage], imageIndex);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentFrame] };
+    VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentImage] };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
 
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrame];
+    submitInfo.pCommandBuffers = &m_commandBuffers[m_currentImage];
 
-    VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[m_currentFrame] };
+    VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[m_currentImage] };
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
     LimitFPS(30);
 
-    if (vkQueueSubmit(VK.GraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentFrame]) != VK_SUCCESS)
+    if (vkQueueSubmit(VK.GraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentImage]) != VK_SUCCESS)
     {
         throw std::runtime_error("failed to submit draw command buffer!");
     }
@@ -1259,5 +1367,15 @@ void WizardChess::DrawFrame()
         throw std::runtime_error("failed to present swap chain image!");
     }
 
-    m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    // Dump first frame
+    if (m_currentFrame == 0)
+    {
+        auto extent = VK.SurfaceManager()->SwapChainExtent();
+        VkImage image = VK.SurfaceManager()->SwapChainImages()[m_currentImage];
+        VkFormat format = VK.SurfaceManager()->SwapChainImageFormat();
+        SaveImageAsBMP(VK.Device(), image, format, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, extent.width, extent.height, "present.bmp");
+    }
+
+    m_currentImage = (m_currentImage + 1) % MAX_FRAMES_IN_FLIGHT;
+    m_currentFrame = m_currentFrame + 1;
 }

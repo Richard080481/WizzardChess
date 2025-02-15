@@ -121,4 +121,87 @@ static VkShaderModule CreateShaderModule(const std::vector<char>& code)
     return shaderModule;
 }
 
+static void CopyImage(
+    VkCommandBuffer    commandBuffer,
+    VkImage            src,
+    VkImage            dst,
+    VkImageAspectFlags aspectMask,
+    uint32_t           width,
+    uint32_t           height)
+{
+    const bool singleTimeCommand = (commandBuffer == VK_NULL_HANDLE);
+    if (singleTimeCommand)
+    {
+        // Create a one-time command buffer
+        commandBuffer = VK.BeginSingleTimeCommands();
+    }
+
+    // Define the region to copy
+    VkImageCopy copyRegion = {};
+    copyRegion.srcSubresource.aspectMask = aspectMask;
+    copyRegion.srcSubresource.mipLevel = 0;
+    copyRegion.srcSubresource.baseArrayLayer = 0;
+    copyRegion.srcSubresource.layerCount = 1;
+    copyRegion.srcOffset = { 0, 0, 0 };
+
+    copyRegion.dstSubresource = copyRegion.srcSubresource;
+    copyRegion.dstOffset = { 0, 0, 0 };
+    copyRegion.extent = { width, height, 1 };
+
+    // Record the copy command
+    vkCmdCopyImage(commandBuffer, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+    if (singleTimeCommand)
+    {
+        // Execute and clean up the command buffer
+        VK.EndSingleTimeCommands(commandBuffer);
+    }
+}
+
+static void CopyImageToBuffer(
+    VkImage            image,
+    VkBuffer           buffer,
+    VkImageAspectFlags aspectMask,
+    uint32_t           width,
+    uint32_t           height)
+{
+    // Get device limits for row alignment
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(VK.PhysicalDevice(), &properties);
+    VkDeviceSize alignment = properties.limits.optimalBufferCopyRowPitchAlignment;
+
+    // Compute the required buffer row length
+    uint32_t pixelSize = sizeof(float); // Assuming VK_FORMAT_D32_SFLOAT
+    uint32_t rowStride = width * pixelSize; // Unaligned row size in bytes
+
+    // Align to the optimal row pitch
+    if (alignment > 0)
+    {
+        rowStride = (rowStride + alignment - 1) & ~(alignment - 1);
+    }
+
+    // Create a one-time command buffer
+    VkCommandBuffer commandBuffer = VK.BeginSingleTimeCommands();
+
+    // Define the region to copy
+    VkBufferImageCopy region = {};
+    region.bufferOffset = 0;
+    region.bufferRowLength = rowStride / pixelSize; // Set aligned width
+    region.bufferImageHeight = 0; // Keep tightly packed
+
+    region.imageSubresource.aspectMask = aspectMask;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+
+    region.imageOffset = { 0, 0, 0 };
+    region.imageExtent = { width, height, 1 };
+
+    // Record the copy command
+    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+
+    // Execute and clean up the command buffer
+    VK.EndSingleTimeCommands(commandBuffer);
+}
+
 #endif // __VULKAN_HELPER_H__

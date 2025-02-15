@@ -53,7 +53,7 @@ private:
     void     CreateTextureImageView();
     void     CreateTextureSampler();
     void     CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-    void     TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void     TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
     void     LoadModel();
     void     CreateUniformBuffers();
     void     CreateDescriptorPool();
@@ -62,6 +62,7 @@ private:
     void     CreateSyncObjects();
     void     UpdateUniformBuffer(uint32_t currentImage, int modelIndex);
     void     DrawFrame();
+    void     SaveImageAsBMP(VkDevice device, VkImage image, VkFormat format, VkImageLayout oldLayout, int width, int height, std::string fileName);
 
     int m_width;
     int m_height;
@@ -101,6 +102,7 @@ private:
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence>     m_inFlightFences;
     uint32_t                 m_currentFrame = 0;
+    uint32_t                 m_currentImage = 0;
 
     bool m_framebufferResized = false;
 };

@@ -22,6 +22,7 @@ set(HEADER_FILES
     include/main.h
     include/Model.h
     include/Types.h
+    include/BmpUtils.h
     include/Utils.h
     include/MemoryTracker.h
     include/VulkanHelper.h
