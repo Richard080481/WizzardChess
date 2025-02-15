@@ -36,7 +36,7 @@ void LimitFPS(const int targetFps = 30)
     static auto lastTime = std::chrono::high_resolution_clock::now();
 
     auto currentTime = std::chrono::high_resolution_clock::now();
-    int elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTime).count();
 
     if (elapsedTime < frameTimeMillisec)
     {

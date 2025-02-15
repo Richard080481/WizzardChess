@@ -1,5 +1,6 @@
 #include "VulkanDeviceManager.h"
 #include "MemoryTracker.h"
+#include "Debug.h"
 
 #include <set>
 
@@ -34,8 +35,8 @@ void VulkanDeviceManager::EnableValidationLayers(
         assert(pValidationLayers != nullptr);
         for (const auto& validationLayerStr : *pValidationLayers)
         {
-            int size = strlen(validationLayerStr) + 1; // null-terminated char array
-            char* layerName = static_cast<char*>(MALLOC(sizeof(char) * size));
+            size_t size      = strlen(validationLayerStr) + 1; // null-terminated char array
+            char*  layerName = static_cast<char*>(MALLOC(sizeof(char) * size));
             assert(layerName != nullptr);
             if (layerName != nullptr)
             {
@@ -65,8 +66,8 @@ void VulkanDeviceManager::EnableDeviceExtensions(const std::vector<const char*>*
     {
         for (const auto& deviceExtensionStr : *pDeviceExtensions)
         {
-            int size = strlen(deviceExtensionStr) + 1; // null-terminated char array
-            char* extensionName = static_cast<char*>(MALLOC(sizeof(char) * size));
+            size_t size          = strlen(deviceExtensionStr) + 1; // null-terminated char array
+            char*  extensionName = static_cast<char*>(MALLOC(sizeof(char) * size));
             assert(extensionName != nullptr);
             if (extensionName != nullptr)
             {
@@ -376,8 +377,15 @@ void VulkanDeviceManager::DestroyInstance()
     }
 }
 
-VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDeviceManager::debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDeviceManager::debugCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT             messageType,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void*                                       pUserData)
 {
+    WC_UNUSED_PARAMETER(messageSeverity);
+    WC_UNUSED_PARAMETER(messageType);
+    WC_UNUSED_PARAMETER(pUserData);
     std::cerr << "[Validation layer] " << pCallbackData->pMessage << std::endl;
 
     return VK_FALSE;
@@ -496,6 +504,8 @@ void VulkanDeviceManager::CreateCommandBuffers(
     uint32_t             count,
     VkCommandBufferLevel level)
 {
+    WC_UNUSED_PARAMETER(level);
+
     assert(pCommandBuffers != nullptr);
     assert(m_commandPool != VK_NULL_HANDLE);
 

@@ -21,6 +21,7 @@
 #include "Types.h"
 #include "Utils.h"
 #include "BmpUtils.h"
+#include "Debug.h"
 #include "VulkanHelper.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSurfaceManager.h"
@@ -171,12 +172,15 @@ struct UniformBufferObjectVs
     alignas(16) glm::mat4 lightProj;
 };
 
+#pragma warning (push)
+#pragma warning (disable: 4324)
 struct UniformBufferObjectFs
 {
-    glm::vec3 lightPos;
+    alignas(16) glm::vec3 lightPos;
     alignas(16) glm::vec3 lightColor;
     alignas(16) glm::vec3 cameraPos;
 };
+#pragma warning (pop)
 
 struct UniformBufferObjectShadowVs
 {
@@ -214,6 +218,8 @@ void WizardChess::run()
 
 static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
 {
+    WC_UNUSED_PARAMETER(width);
+    WC_UNUSED_PARAMETER(height);
     auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
     app->SetFramebufferResized();
 }
@@ -227,6 +233,8 @@ void WizardChess::InitVulkan()
     ///      This ensures GLFW performs its internal setups, including platform-specific windowing
     ///      and registering Vulkan extensions required for rendering.
     VK.CreateGlfwWindow(m_width, m_height);
+
+    glfwSetFramebufferSizeCallback(VK.SurfaceManager()->Window(), framebufferResizeCallback);
 
     // Enable validation layers for debugging and error checking (if enabled).
     // This registers the list of validation layers that will be used.
@@ -256,7 +264,7 @@ void WizardChess::InitVulkan()
 
     // Allocate command buffers from the command pool for recording rendering commands.
     m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT); // Resize to match the number of frames in flight.
-    VK.CreateCommandBuffers(m_commandBuffers.data(), m_commandBuffers.size());
+    VK.CreateCommandBuffers(m_commandBuffers.data(), static_cast<uint32_t>(m_commandBuffers.size()));
 
     // Create the render pass, defining how rendering operations interact with framebuffers.
     CreateRenderPass();
@@ -1093,6 +1101,8 @@ void WizardChess::CreateImage(uint32_t width, uint32_t height, VkFormat format, 
 
 void WizardChess::TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
 {
+    WC_UNUSED_PARAMETER(format);
+
     const bool singleTimeCommand = (commandBuffer == VK_NULL_HANDLE);
     if (singleTimeCommand)
     {
@@ -1181,9 +1191,6 @@ void WizardChess::LoadModel()
     {
         constexpr EModelName firstModelIndex = EModelName::Bishop;
         constexpr EModelName lastModelIndex  = EModelName::Queen;
-        constexpr int        numModels       = lastModelIndex - firstModelIndex + 1;
-        constexpr float      x_offset        = 1.2f;
-        constexpr float      theta           = 360.0f / numModels;
         float                maxScale        = 0.0f;
 
         for (int i = firstModelIndex; i <= lastModelIndex; i++)
@@ -1423,10 +1430,12 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     // Get the current swap chain extent for setting up the render area.
     auto swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
 
+#if ROTATE_WORLD
     // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+#endif // ROTATE_WORLD
 
     // First shadow map pass
     {
@@ -1668,7 +1677,7 @@ void WizardChess::CreateSyncObjects()
     }
 }
 
-void WizardChess::UpdateUniformBuffer(uint32_t currentImage, int modelIndex)
+void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
 {
     // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
@@ -1856,7 +1865,7 @@ void WizardChess::DrawFrame()
         throw std::runtime_error("failed to acquire swap chain image!");
     }
 
-    UpdateUniformBuffer(m_currentImage, 0);
+    UpdateUniformBuffer(m_currentImage);
 
     vkResetFences(VK.Device(), 1, &m_inFlightFences[m_currentImage]);
 

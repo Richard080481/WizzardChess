@@ -6,6 +6,7 @@ project(WizardChess)
 # Set the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Source files
 set(SOURCE_FILES
@@ -20,6 +21,7 @@ set(SOURCE_FILES
 # Header files
 set(HEADER_FILES
     include/main.h
+    include/Debug.h
     include/Model.h
     include/Types.h
     include/BmpUtils.h
@@ -99,3 +101,10 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT $
 target_compile_definitions(${PROJECT_NAME} PRIVATE TEXTURE_PATH="${CMAKE_SOURCE_DIR}/assets/textures/")
 target_compile_definitions(${PROJECT_NAME} PRIVATE MODEL_PATH="${CMAKE_SOURCE_DIR}/assets/models/")
 target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILED_SHADER_ROOT="${CMAKE_BINARY_DIR}/compiled_shaders/")
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /WX)
+    target_compile_options(${PROJECT_NAME} PRIVATE /std:c++17 /Zc:__cplusplus)
+else()
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()

@@ -8,9 +8,9 @@
 
 struct SwapChainSupportDetails
 {
-    VkSurfaceCapabilitiesKHR capabilities;
+    VkSurfaceCapabilitiesKHR        capabilities{};
     std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
+    std::vector<VkPresentModeKHR>   presentModes;
 };
 
 class VulkanDeviceManager;
@@ -43,7 +43,7 @@ public:
     const std::vector<VkImage>&     SwapChainImages()      const { return m_swapChainImages; }
     VkFormat                        SwapChainImageFormat() const { return m_swapChainImageFormat; }
     const std::vector<VkImageView>& SwapChainImageViews()  const { return m_swapChainImageViews; }
-    
+
 
     void GetGlfwFrameBufferSize(int* pWidth, int* pHeight);
 private:

@@ -113,7 +113,7 @@ void Model::Load(std::string fileNmae)
                 };
             }
 
-            m_indices.push_back(m_vertices.size());
+            m_indices.push_back(static_cast<uint32_t>(m_vertices.size()));
             m_vertices.push_back(vertex);
         }
     }

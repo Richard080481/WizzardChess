@@ -66,7 +66,7 @@ private:
     void     CreateDescriptorSets();
     void     RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     void     CreateSyncObjects();
-    void     UpdateUniformBuffer(uint32_t currentImage, int modelIndex);
+    void     UpdateUniformBuffer(uint32_t currentImage);
     void     DrawFrame();
     void     SaveImageAsBMP(VkDevice device, VkImage image, VkFormat format, VkImageLayout oldLayout, int width, int height, std::string fileName);
 
@@ -74,21 +74,21 @@ private:
     int m_height;
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
-    VkFramebuffer           m_shadowPassFramebuffer;
+    VkFramebuffer           m_shadowPassFramebuffer         = VK_NULL_HANDLE;
 
-    VkRenderPass            m_renderPass           = VK_NULL_HANDLE;
-    VkDescriptorSetLayout   m_descriptorSetLayout  = VK_NULL_HANDLE;
-    VkPipelineLayout        m_pipelineLayout       = VK_NULL_HANDLE;
-    VkPipeline              m_graphicsPipeline     = VK_NULL_HANDLE;
+    VkRenderPass            m_renderPass                    = VK_NULL_HANDLE;
+    VkDescriptorSetLayout   m_descriptorSetLayout           = VK_NULL_HANDLE;
+    VkPipelineLayout        m_pipelineLayout                = VK_NULL_HANDLE;
+    VkPipeline              m_graphicsPipeline              = VK_NULL_HANDLE;
 
-    VkImage                 m_depthImage           = VK_NULL_HANDLE;
-    VkDeviceMemory          m_depthImageMemory     = VK_NULL_HANDLE;
-    VkImageView             m_depthImageView       = VK_NULL_HANDLE;
+    VkImage                 m_depthImage                    = VK_NULL_HANDLE;
+    VkDeviceMemory          m_depthImageMemory              = VK_NULL_HANDLE;
+    VkImageView             m_depthImageView                = VK_NULL_HANDLE;
 
-    VkImage                 m_textureImage         = VK_NULL_HANDLE;
-    VkDeviceMemory          m_textureImageMemory   = VK_NULL_HANDLE;
-    VkImageView             m_textureImageView     = VK_NULL_HANDLE;
-    VkSampler               m_textureSampler       = VK_NULL_HANDLE;
+    VkImage                 m_textureImage                  = VK_NULL_HANDLE;
+    VkDeviceMemory          m_textureImageMemory            = VK_NULL_HANDLE;
+    VkImageView             m_textureImageView              = VK_NULL_HANDLE;
+    VkSampler               m_textureSampler                = VK_NULL_HANDLE;
 
     const VkFormat          m_shadowMapFormat               = VK_FORMAT_D32_SFLOAT;
     const VkExtent2D        m_shadowMapExtent               = { SHADOW_MAP_WIDTH, SHADOW_MAP_HEIGHT };

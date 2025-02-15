@@ -8,6 +8,8 @@
 
 #include "VulkanDeviceManager.h"
 
+#pragma warning (disable: 4505)
+
 static uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties)
 {
     VkPhysicalDeviceMemoryProperties memProperties;
@@ -177,7 +179,7 @@ static void CopyImageToBuffer(
     // Align to the optimal row pitch
     if (alignment > 0)
     {
-        rowStride = (rowStride + alignment - 1) & ~(alignment - 1);
+        rowStride = static_cast<uint32_t>((rowStride + alignment - 1) & ~(alignment - 1));
     }
 
     // Create a one-time command buffer
