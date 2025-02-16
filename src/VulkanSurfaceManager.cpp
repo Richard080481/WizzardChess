@@ -7,13 +7,22 @@
 
 void VulkanSurfaceManager::InitWindow(int width, int height)
 {
+    assert(m_window == nullptr);
+
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     m_window = glfwCreateWindow(width, height, "Vulkan", nullptr, nullptr);
-    glfwSetWindowUserPointer(m_window, this);
-    //glfwSetFramebufferSizeCallback(m_window, framebufferResizeCallback);
+}
+
+void VulkanSurfaceManager::DestroyWindow()
+{
+    assert(m_window != nullptr);
+
+    glfwDestroyWindow(m_window);
+
+    m_window = nullptr;
 }
 
 void VulkanSurfaceManager::CreateSurface()

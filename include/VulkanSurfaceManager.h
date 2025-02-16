@@ -25,8 +25,26 @@ public:
     }
 
     void InitWindow(int width, int height);
+    void DestroyWindow();
     void CreateSurface();
     void DestroySurface();
+
+    void SetWindowUserPointer(void* pointer) const
+    {
+        glfwSetWindowUserPointer(m_window, pointer);
+    }
+    void SetFramebufferSizeCallback(GLFWframebuffersizefun callback) const
+    {
+        glfwSetFramebufferSizeCallback(m_window, callback);
+    }
+    void SetMouseButtonCallback(GLFWmousebuttonfun callback) const
+    {
+        glfwSetMouseButtonCallback(m_window, callback);
+    }
+    int WindowShouldClose() const
+    {
+        return glfwWindowShouldClose(m_window);
+    }
 
     SwapChainSupportDetails         QuerySwapChainSupport(VkPhysicalDevice device);
     VkSurfaceFormatKHR              ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
@@ -35,9 +53,7 @@ public:
     void                            CreateSwapChain();
     void                            DestroySwapChain();
 
-    GLFWwindow*                     Window()  const { return m_window; }
-    VkSurfaceKHR                    Surface() const { return m_surface; }
-
+    VkSurfaceKHR                    Surface()              const { return m_surface; }
     VkSwapchainKHR                  SwapChain()            const { return m_swapChain; }
     const VkExtent2D                SwapChainExtent()      const { return m_swapChainExtent; }
     const std::vector<VkImage>&     SwapChainImages()      const { return m_swapChainImages; }

@@ -38,6 +38,9 @@ public:
         m_framebufferResized = true;
     }
 
+    int WindowWidth()  const { return m_width; }
+    int WindowHeight() const { return m_height; }
+
 private:
     void     InitVulkan();
     void     MainLoop();

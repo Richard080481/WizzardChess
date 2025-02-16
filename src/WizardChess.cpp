@@ -224,6 +224,27 @@ static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
     app->SetFramebufferResized();
 }
 
+// Callback function to handle mouse button events
+static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+{
+    WC_UNUSED_PARAMETER(mods);
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
+    {
+        // Left mouse button pressed
+        double mouseX, mouseY;
+        glfwGetCursorPos(window, &mouseX, &mouseY);
+
+        auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
+        float normalizedX = static_cast<float>((2.0f * mouseX) / app->WindowWidth() - 1.0f);
+        float normalizedY = static_cast<float>(1.0f - (2.0f * mouseY) / app->WindowHeight());
+
+        printf("%f %f\n", normalizedX, normalizedY);
+
+        ///@TODO Do something with the mouse position (e.g., ray picking or color picking)
+    }
+}
+
 void WizardChess::InitVulkan()
 {
     // Create a VulkanDeviceManager object to manage Vulkan-specific operations.
@@ -234,7 +255,11 @@ void WizardChess::InitVulkan()
     ///      and registering Vulkan extensions required for rendering.
     VK.CreateGlfwWindow(m_width, m_height);
 
-    glfwSetFramebufferSizeCallback(VK.SurfaceManager()->Window(), framebufferResizeCallback);
+    // Set glfw window callback functions.
+    VulkanSurfaceManager* pSurfaceManager = VK.SurfaceManager();
+    pSurfaceManager->SetWindowUserPointer(this);
+    pSurfaceManager->SetFramebufferSizeCallback(framebufferResizeCallback);
+    pSurfaceManager->SetMouseButtonCallback(mouseButtonCallback);
 
     // Enable validation layers for debugging and error checking (if enabled).
     // This registers the list of validation layers that will be used.
@@ -318,7 +343,7 @@ void WizardChess::InitVulkan()
 
 void WizardChess::MainLoop()
 {
-    while (!glfwWindowShouldClose(VK.SurfaceManager()->Window()))
+    while (!VK.SurfaceManager()->WindowShouldClose())
     {
         glfwPollEvents();
         DrawFrame();

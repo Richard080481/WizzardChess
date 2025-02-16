@@ -436,7 +436,7 @@ void VulkanDeviceManager::Destroy()
 
     DestroyDeviceExtensionNames();
 
-    glfwDestroyWindow(m_pSurfaceManager->Window());
+    m_pSurfaceManager->DestroyWindow();
 
     delete m_pSurfaceManager;
     m_pSurfaceManager = nullptr;
