@@ -35,12 +35,20 @@ struct ModelPushConstants
         glm::mat4 world;
         glm::mat4 model;
         glm::mat4 normailzeMatrix;
-        int       isBlack;
+        uint32_t  isBlack;
     } vs;
 
     struct ModelFsPushConstants
     {
-        ERenderMode renderMode;
+        union
+        {
+            ERenderMode renderMode;
+            struct s_fileRank
+            {
+                uint16_t file;
+                uint16_t rank;
+            } fileRank;
+        };
     } fs;
 };
 

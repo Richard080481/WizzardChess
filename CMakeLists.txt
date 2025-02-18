@@ -39,6 +39,8 @@ set(SHADER_SOURCE_FILES
     ${CMAKE_SOURCE_DIR}/assets/shaders/shader.vert
     ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.frag
     ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.vert
+    ${CMAKE_SOURCE_DIR}/assets/shaders/select.frag
+    ${CMAKE_SOURCE_DIR}/assets/shaders/select.vert
 )
 
 # Organize shader files in the Visual Studio solution
@@ -50,11 +52,15 @@ add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/compiled_shaders/vert.spv
     OUTPUT ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_frag.spv
     OUTPUT ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_vert.spv
+    OUTPUT ${CMAKE_BINARY_DIR}/compiled_shaders/select_frag.spv
+    OUTPUT ${CMAKE_BINARY_DIR}/compiled_shaders/select_vert.spv
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/shaders
     COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/shader.frag ${CMAKE_BINARY_DIR}/compiled_shaders/frag.spv
     COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/shader.vert ${CMAKE_BINARY_DIR}/compiled_shaders/vert.spv
     COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.frag ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_frag.spv
     COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/shadow.vert ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_vert.spv
+    COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/select.frag ${CMAKE_BINARY_DIR}/compiled_shaders/select_frag.spv
+    COMMAND ${CMAKE_SOURCE_DIR}/assets/shaders/compile.bat ${CMAKE_SOURCE_DIR}/assets/shaders/select.vert ${CMAKE_BINARY_DIR}/compiled_shaders/select_vert.spv
     DEPENDS ${SHADER_SOURCE_FILES}
     COMMENT "Compiling shaders into ${CMAKE_BINARY_DIR}/shaders"
 )
@@ -91,6 +97,10 @@ add_custom_target(Shaders
     DEPENDS ${SHADER_SOURCE_FILES}
     DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/frag.spv
     DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/vert.spv
+    DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_frag.spv
+    DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/shadow_vert.spv
+    DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/select_frag.spv
+    DEPENDS ${CMAKE_BINARY_DIR}/compiled_shaders/select_vert.spv
 )
 add_dependencies(${PROJECT_NAME} Shaders)
 

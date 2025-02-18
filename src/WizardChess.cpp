@@ -26,7 +26,7 @@
 #include "VulkanDeviceManager.h"
 #include "VulkanSurfaceManager.h"
 
-#define ROTATE_WORLD 0
+#define ROTATE_WORLD false
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -66,6 +66,8 @@ enum EShader : unsigned int
     Frag       = 1,
     ShadowVert = 2,
     ShadowFrag = 3,
+    SelectVert = 4,
+    SelectFrag = 5,
 };
 
 static inline std::string GetModelPaths(enum EModelName index)
@@ -103,6 +105,8 @@ static inline std::string GetShaderPaths(enum EShader index)
         "frag.spv",
         "shadow_vert.spv",
         "shadow_frag.spv",
+        "select_vert.spv",
+        "select_frag.spv",
     };
 
     return COMPILED_SHADER_ROOT + std::string(shaderFileNames[index]);
@@ -188,6 +192,12 @@ struct UniformBufferObjectShadowVs
     alignas(16) glm::mat4 lightProj;
 };
 
+struct UniformBufferObjectSelectionMapVs
+{
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
+};
+
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<const char*> g_deviceExtensions =
@@ -234,14 +244,17 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
         // Left mouse button pressed
         double mouseX, mouseY;
         glfwGetCursorPos(window, &mouseX, &mouseY);
+        // printf("mouse: %f %f\n", mouseX, mouseY);
 
         auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
-        float normalizedX = static_cast<float>((2.0f * mouseX) / app->WindowWidth() - 1.0f);
-        float normalizedY = static_cast<float>(1.0f - (2.0f * mouseY) / app->WindowHeight());
 
-        printf("%f %f\n", normalizedX, normalizedY);
-
-        ///@TODO Do something with the mouse position (e.g., ray picking or color picking)
+        int file;
+        int rank;
+        app->ReadSelectionMap(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (uint32_t)mouseX, (uint32_t)mouseY, &file, &rank);
+        if ((file != 0) && (rank != 0))
+        {
+            printf("%c%c\n", file - 1 + 'A', rank + '0');
+        }
     }
 }
 
@@ -297,23 +310,14 @@ void WizardChess::InitVulkan()
     // Set up the descriptor set layout, which specifies how shaders access resources like uniforms and textures.
     CreateDescriptorSetLayout();
 
-    // Create the graphics pipeline, which configures shaders, input assembly, viewport, and other rendering states.
-    CreateGraphicsPipeline();
+    // Create pipelines
+    CreatePipelines();
 
-    // Create the graphics pipeline for shadow map pass
-    CreateShadowPassGraphicsPipeline();
+    // Create resources
+    CreateResources();
 
-    // Create resources for depth buffering, allowing proper handling of 3D object occlusion.
-    CreateDepthResources();
-
-    // Create shadow map
-    CreateShadowMapResources();
-
-    // Create shadow pass framebuffers.
-    CreateShadowPassFramebuffers();
-
-    // Create framebuffers, which represent the render targets for each swap chain image.
-    CreateSwapChainFramebuffers();
+    // Create framebuffers
+    CreateFramebuffers();
 
     // Load and create a texture image from file.
     CreateTextureImage();
@@ -347,6 +351,7 @@ void WizardChess::MainLoop()
     {
         glfwPollEvents();
         DrawFrame();
+        //break;
     }
 
     vkDeviceWaitIdle(VK.Device());
@@ -363,6 +368,11 @@ void WizardChess::CleanupSwapChain()
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
+
+    vkDestroyImageView(device, m_selectionMapImageView, nullptr);
+    vkDestroyImage(device, m_selectionMapImage, nullptr);
+    vkFreeMemory(device, m_selectionMapImageMemory, nullptr);
+    vkDestroyFramebuffer(device, m_selectionMapFramebuffer, nullptr);
 
     auto swapChainImageViews = VK.SurfaceManager()->SwapChainImageViews();
     for (auto imageView : swapChainImageViews)
@@ -386,6 +396,10 @@ void WizardChess::Cleanup()
     vkDestroyPipelineLayout(device, m_shadowPassPipelineLayout, nullptr);
     vkDestroyRenderPass(device, m_shadowRenderPass, nullptr);
 
+    vkDestroyPipeline(device, m_selectionMapGraphicsPipeline, nullptr);
+    vkDestroyPipelineLayout(device, m_selectionMapPipelineLayout, nullptr);
+    vkDestroyRenderPass(device, m_selectionMapRenderPass, nullptr);
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
         vkDestroyBuffer(device, m_vsUniformBuffers[i], nullptr);
@@ -401,6 +415,10 @@ void WizardChess::Cleanup()
         vkFreeMemory(device, m_shadowVsUniformBuffersMemory[i], nullptr);
     }
 
+    vkDestroyBuffer(device, m_selectionMapVsUniformBuffer, nullptr);
+    vkUnmapMemory(device, m_selectionMapVsUniformBufferMemory);
+    vkFreeMemory(device, m_selectionMapVsUniformBufferMemory, nullptr);
+
     vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
 
     vkDestroySampler(device, m_textureSampler, nullptr);
@@ -412,11 +430,11 @@ void WizardChess::Cleanup()
     vkDestroyImageView(device, m_shadowImageView, nullptr);
     vkDestroyImage(device, m_shadowImage, nullptr);
     vkFreeMemory(device, m_shadowImageMemory, nullptr);
-
     vkDestroyFramebuffer(device, m_shadowPassFramebuffer, nullptr);
 
     vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, m_shadowPassDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, m_selectionMapDescriptorSetLayout, nullptr);
 
     for (auto& [modelName, pModel] : m_uniqueModels)
     {
@@ -446,107 +464,179 @@ void WizardChess::RecreateSwapChain()
     VK.CreateSwapChain();
     CreateDepthResources();
     CreateSwapChainFramebuffers();
+    CreateSelectionMapResources();
+    CreateSelectionMapFramebuffers();
 }
 
 void WizardChess::CreateRenderPass()
 {
-    // Create shadow map renderpass
+    CreateShadowPassRenderPass();
+    CreateScenePassRenderPass();
+    CreateSelectionMapPassRenderPass();
+}
+
+void WizardChess::CreateShadowPassRenderPass()
+{
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format          = m_shadowMapFormat;
+    depthAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment   = 0;
+    depthAttachmentRef.layout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkRenderPassCreateInfo renderPassInfo = {};
+    renderPassInfo.sType            = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount  = 1;
+    renderPassInfo.pAttachments     = &depthAttachment;
+    renderPassInfo.subpassCount     = 1;
+    renderPassInfo.pSubpasses       = &subpass;
+
+    if (vkCreateRenderPass(VK.Device(), &renderPassInfo, nullptr, &m_shadowRenderPass) != VK_SUCCESS)
     {
-        VkAttachmentDescription depthAttachment{};
-        depthAttachment.format          = m_shadowMapFormat;
-        depthAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
-        depthAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depthAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
-        depthAttachment.finalLayout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentReference depthAttachmentRef{};
-        depthAttachmentRef.attachment   = 0;
-        depthAttachmentRef.layout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass{};
-        subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType            = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount  = 1;
-        renderPassInfo.pAttachments     = &depthAttachment;
-        renderPassInfo.subpassCount     = 1;
-        renderPassInfo.pSubpasses       = &subpass;
-
-        if (vkCreateRenderPass(VK.Device(), &renderPassInfo, nullptr, &m_shadowRenderPass) != VK_SUCCESS)
-        {
-            throw std::runtime_error("failed to create render pass!");
-        }
+        throw std::runtime_error("failed to create render pass!");
     }
+}
 
-    // Create render pass
+void WizardChess::CreateScenePassRenderPass()
+{
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format          = VK.SurfaceManager()->SwapChainImageFormat();
+    colorAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format          = DepthFormat();
+    depthAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment   = 0;
+    colorAttachmentRef.layout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment   = 1;
+    depthAttachmentRef.layout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount    = 1;
+    subpass.pColorAttachments       = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    std::array<VkSubpassDependency, 2> dependency{};
+    dependency[0].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependency[0].dstSubpass        = 0;
+    dependency[0].srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[0].srcAccessMask     = 0;
+    dependency[0].dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[0].dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency[1].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependency[1].dstSubpass        = 0;
+    dependency[1].srcStageMask      = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[1].srcAccessMask     = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency[1].dstStageMask      = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[1].dstAccessMask     = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+    std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType            = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount  = static_cast<uint32_t>(attachments.size());
+    renderPassInfo.pAttachments     = attachments.data();
+    renderPassInfo.subpassCount     = 1;
+    renderPassInfo.pSubpasses       = &subpass;
+    renderPassInfo.dependencyCount  = static_cast<uint32_t>(dependency.size());
+    renderPassInfo.pDependencies    = dependency.data();
+
+    if (vkCreateRenderPass(VK.Device(), &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS)
     {
-        VkAttachmentDescription colorAttachment{};
-        colorAttachment.format          = VK.SurfaceManager()->SwapChainImageFormat();
-        colorAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        throw std::runtime_error("failed to create render pass!");
+    }
+}
 
-        VkAttachmentDescription depthAttachment{};
-        depthAttachment.format          = FindDepthFormat();
-        depthAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
-        depthAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depthAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
-        depthAttachment.finalLayout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+void WizardChess::CreateSelectionMapPassRenderPass()
+{
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format          = m_selectionMapFormat;
+    colorAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference colorAttachmentRef{};
-        colorAttachmentRef.attachment   = 0;
-        colorAttachmentRef.layout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format          = DepthFormat();
+    depthAttachment.samples         = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp          = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp         = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp   = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp  = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference depthAttachmentRef{};
-        depthAttachmentRef.attachment   = 1;
-        depthAttachmentRef.layout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment   = 0;
+    colorAttachmentRef.layout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        VkSubpassDescription subpass{};
-        subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount    = 1;
-        subpass.pColorAttachments       = &colorAttachmentRef;
-        subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment   = 1;
+    depthAttachmentRef.layout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        std::array<VkSubpassDependency, 2> dependency{};
-        dependency[0].srcSubpass           = VK_SUBPASS_EXTERNAL;
-        dependency[0].dstSubpass           = 0;
-        dependency[0].srcStageMask         = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency[0].srcAccessMask        = 0;
-        dependency[0].dstStageMask         = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency[0].dstAccessMask        = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        dependency[1].srcSubpass           = VK_SUBPASS_EXTERNAL;
-        dependency[1].dstSubpass           = 0;
-        dependency[1].srcStageMask         = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency[1].srcAccessMask        = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        dependency[1].dstStageMask         = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency[1].dstAccessMask        = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount    = 1;
+    subpass.pColorAttachments       = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
-        std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType            = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount  = static_cast<uint32_t>(attachments.size());
-        renderPassInfo.pAttachments     = attachments.data();
-        renderPassInfo.subpassCount     = 1;
-        renderPassInfo.pSubpasses       = &subpass;
-        renderPassInfo.dependencyCount  = static_cast<uint32_t>(dependency.size());
-        renderPassInfo.pDependencies    = dependency.data();
+    std::array<VkSubpassDependency, 2> dependency{};
+    dependency[0].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependency[0].dstSubpass        = 0;
+    dependency[0].srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[0].srcAccessMask     = 0;
+    dependency[0].dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[0].dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency[1].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependency[1].dstSubpass        = 0;
+    dependency[1].srcStageMask      = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[1].srcAccessMask     = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency[1].dstStageMask      = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency[1].dstAccessMask     = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
 
-        if (vkCreateRenderPass(VK.Device(), &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS)
-        {
-            throw std::runtime_error("failed to create render pass!");
-        }
+    std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType            = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount  = static_cast<uint32_t>(attachments.size());
+    renderPassInfo.pAttachments     = attachments.data();
+    renderPassInfo.subpassCount     = 1;
+    renderPassInfo.pSubpasses       = &subpass;
+    renderPassInfo.dependencyCount  = static_cast<uint32_t>(dependency.size());
+    renderPassInfo.pDependencies    = dependency.data();
+
+    if (vkCreateRenderPass(VK.Device(), &renderPassInfo, nullptr, &m_selectionMapRenderPass) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create render pass!");
     }
 }
 
@@ -614,6 +704,34 @@ void WizardChess::CreateDescriptorSetLayout()
             throw std::runtime_error("failed to create descriptor set layout!");
         }
     }
+
+    // Create selection map descriptor set layout
+    {
+        VkDescriptorSetLayoutBinding uboLayoutBinding{};
+        // UBO for VS
+        uboLayoutBinding.binding                = 0;
+        uboLayoutBinding.descriptorCount        = 1;
+        uboLayoutBinding.descriptorType         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.pImmutableSamplers     = nullptr;
+        uboLayoutBinding.stageFlags             = VK_SHADER_STAGE_VERTEX_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType                        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount                 = 1;
+        layoutInfo.pBindings                    = &uboLayoutBinding;
+
+        if (vkCreateDescriptorSetLayout(VK.Device(), &layoutInfo, nullptr, &m_selectionMapDescriptorSetLayout) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create descriptor set layout!");
+        }
+    }
+}
+
+void WizardChess::CreatePipelines()
+{
+    CreateGraphicsPipeline();
+    CreateShadowPassGraphicsPipeline();
+    CreateSelectionMapGraphicsPipeline();
 }
 
 void WizardChess::CreateGraphicsPipeline()
@@ -876,6 +994,150 @@ void WizardChess::CreateShadowPassGraphicsPipeline()
     vkDestroyShaderModule(VK.Device(), vertShaderModule, nullptr);
 }
 
+void WizardChess::CreateSelectionMapGraphicsPipeline()
+{
+    auto vertShaderCode = ReadFile(GetShaderPaths(EShader::SelectVert));
+    auto fragShaderCode = ReadFile(GetShaderPaths(EShader::SelectFrag));
+
+    VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName  = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName  = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    auto bindingDescription    = Vertex::GetBindingDescription();
+    auto attributeDescriptions = Vertex::GetAttributeDescriptions();
+
+    vertexInputInfo.vertexBindingDescriptionCount   = 1;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexBindingDescriptions      = &bindingDescription;
+    vertexInputInfo.pVertexAttributeDescriptions    = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount  = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType                    = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable         = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable  = VK_FALSE;
+    rasterizer.polygonMode              = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth                = 1.0f;
+    rasterizer.cullMode                 = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace                = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable          = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable   = VK_FALSE;
+    multisampling.rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType                  = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable        = VK_TRUE;
+    depthStencil.depthWriteEnable       = VK_TRUE;
+    depthStencil.depthCompareOp         = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable  = VK_FALSE;
+    depthStencil.stencilTestEnable      = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable    = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType                 = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable         = VK_FALSE;
+    colorBlending.logicOp               = VK_LOGIC_OP_COPY;
+    colorBlending.attachmentCount       = 1;
+    colorBlending.pAttachments          = &colorBlendAttachment;
+    colorBlending.blendConstants[0]     = 0.0f;
+    colorBlending.blendConstants[1]     = 0.0f;
+    colorBlending.blendConstants[2]     = 0.0f;
+    colorBlending.blendConstants[3]     = 0.0f;
+
+    std::vector<VkDynamicState> dynamicStates =
+    {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType              = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount  = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates     = dynamicStates.data();
+
+    std::vector<VkPushConstantRange> pushConstantRange(2);
+    pushConstantRange[0].offset        = offsetof(ModelPushConstants, vs);
+    pushConstantRange[0].size          = sizeof(ModelPushConstants::ModelVsPushConstants);
+    pushConstantRange[0].stageFlags    = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange[1].offset        = offsetof(ModelPushConstants, fs);
+    pushConstantRange[1].size          = sizeof(ModelPushConstants::ModelFsPushConstants);
+    pushConstantRange[1].stageFlags    = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType                    = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount           = 1;
+    pipelineLayoutInfo.pSetLayouts              = &m_selectionMapDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount   = static_cast<uint32_t>(pushConstantRange.size());
+    pipelineLayoutInfo.pPushConstantRanges      = pushConstantRange.data();
+
+    if (vkCreatePipelineLayout(VK.Device(), &pipelineLayoutInfo, nullptr, &m_selectionMapPipelineLayout) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create pipeline layout!");
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType                  = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount             = 2;
+    pipelineInfo.pStages                = shaderStages;
+    pipelineInfo.pVertexInputState      = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState    = &inputAssembly;
+    pipelineInfo.pViewportState         = &viewportState;
+    pipelineInfo.pRasterizationState    = &rasterizer;
+    pipelineInfo.pMultisampleState      = &multisampling;
+    pipelineInfo.pDepthStencilState     = &depthStencil;
+    pipelineInfo.pColorBlendState       = &colorBlending;
+    pipelineInfo.pDynamicState          = &dynamicState;
+    pipelineInfo.layout                 = m_selectionMapPipelineLayout;
+    pipelineInfo.renderPass             = m_selectionMapRenderPass;
+    pipelineInfo.subpass                = 0;
+    pipelineInfo.basePipelineHandle     = VK_NULL_HANDLE;
+
+    if (vkCreateGraphicsPipelines(VK.Device(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_selectionMapGraphicsPipeline) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create graphics pipeline!");
+    }
+
+    vkDestroyShaderModule(VK.Device(), fragShaderModule, nullptr);
+    vkDestroyShaderModule(VK.Device(), vertShaderModule, nullptr);
+}
+
+void WizardChess::CreateFramebuffers()
+{
+    CreateSwapChainFramebuffers();
+    CreateShadowPassFramebuffers();
+    CreateSelectionMapFramebuffers();
+}
+
 void WizardChess::CreateSwapChainFramebuffers()
 {
     auto swapChainImageViews = VK.SurfaceManager()->SwapChainImageViews();
@@ -925,10 +1187,42 @@ void WizardChess::CreateShadowPassFramebuffers()
     }
 }
 
+void WizardChess::CreateSelectionMapFramebuffers()
+{
+    auto extent = VK.SurfaceManager()->SwapChainExtent();
+
+    std::array<VkImageView, 2> attachments =
+    {
+        m_selectionMapImageView,
+        m_depthImageView
+    };
+
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass      = m_selectionMapRenderPass;
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.pAttachments    = attachments.data();
+    framebufferInfo.width           = extent.width;
+    framebufferInfo.height          = extent.height;
+    framebufferInfo.layers          = 1;
+
+    if (vkCreateFramebuffer(VK.Device(), &framebufferInfo, nullptr, &m_selectionMapFramebuffer) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create framebuffer!");
+    }
+}
+
+void WizardChess::CreateResources()
+{
+    CreateDepthResources();
+    CreateShadowMapResources();
+    CreateSelectionMapResources();
+}
+
 void WizardChess::CreateDepthResources()
 {
     const VkExtent2D swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
-    const VkFormat   depthFormat     = FindDepthFormat();
+    const VkFormat   depthFormat     = DepthFormat();
 
     CreateImage(swapChainExtent.width,
                 swapChainExtent.height,
@@ -956,6 +1250,22 @@ void WizardChess::CreateShadowMapResources()
     TransitionImageLayout(VK_NULL_HANDLE, m_shadowImage, m_shadowMapFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
+void WizardChess::CreateSelectionMapResources()
+{
+    const VkExtent2D swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
+
+    CreateImage(swapChainExtent.width,
+                swapChainExtent.height,
+                m_selectionMapFormat,
+                VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                m_selectionMapImage,
+                m_selectionMapImageMemory);
+    m_selectionMapImageView = VK.CreateImageView(m_selectionMapImage, m_selectionMapFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+    TransitionImageLayout(VK_NULL_HANDLE, m_selectionMapImage, m_selectionMapFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+}
+
 VkFormat WizardChess::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features)
 {
     for (VkFormat format : candidates)
@@ -976,13 +1286,17 @@ VkFormat WizardChess::FindSupportedFormat(const std::vector<VkFormat>& candidate
     throw std::runtime_error("failed to find supported format!");
 }
 
-VkFormat WizardChess::FindDepthFormat()
+VkFormat WizardChess::DepthFormat()
 {
-    return FindSupportedFormat(
-        { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
-        VK_IMAGE_TILING_OPTIMAL,
-        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
-    );
+    if (m_depthFormat == VK_FORMAT_UNDEFINED)
+    {
+        m_depthFormat = FindSupportedFormat(
+            { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+        );
+    }
+    return m_depthFormat;
 }
 
 bool WizardChess::HasStencilComponent(VkFormat format)
@@ -1124,7 +1438,7 @@ void WizardChess::CreateImage(uint32_t width, uint32_t height, VkFormat format, 
     vkBindImageMemory(device, image, imageMemory, 0);
 }
 
-void WizardChess::TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
+void WizardChess::TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const
 {
     WC_UNUSED_PARAMETER(format);
 
@@ -1244,17 +1558,7 @@ void WizardChess::LoadModel()
     {
         Model* pModel = new Model(GetModelPaths(EModelName::Cube), EModelType::ChessBoard);
 
-        constexpr float cellCenterOffset = 0.5f;
-        constexpr float borderOffset     = 0.75f;
-        pModel->Translate(glm::vec3(-(borderOffset + cellCenterOffset), 0.0f, (borderOffset + cellCenterOffset)));
-
-        constexpr float scale = 4.75f;
-        pModel->Scale(glm::vec3(scale, 0.0f, scale));
-        pModel->Translate(glm::vec3(1.0f, 0.0f, -1.0f));
-
-        ///@note Originally the model was along z-axis.
-        ///      Rotate -90 degree along x-axis to make it point to the y-axis.
-        pModel->Rotate(-90.0f, glm::vec3(1.0f, 0.0f, 0.0f));
+        pModel->Scale(glm::vec3(1.0f, 0.0001f, 1.0f));
 
         m_uniqueModels[EModelName::Cube] = pModel;
     }
@@ -1264,7 +1568,7 @@ void WizardChess::CreateUniformBuffers()
 {
     // For shadow pass vertex shader
     {
-        VkDeviceSize bufferSize = sizeof(UniformBufferObjectVs);
+        VkDeviceSize bufferSize = sizeof(UniformBufferObjectShadowVs);
 
         m_shadowVsUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         m_shadowVsUniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1309,13 +1613,20 @@ void WizardChess::CreateUniformBuffers()
             vkMapMemory(VK.Device(), m_fsUniformBuffersMemory[i], 0, bufferSize, 0, &m_fsUniformBuffersMapped[i]);
         }
     }
+
+    // For selection map vertex shader
+    {
+        VkDeviceSize bufferSize = sizeof(UniformBufferObjectSelectionMapVs);
+        CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_selectionMapVsUniformBuffer, m_selectionMapVsUniformBufferMemory);
+        vkMapMemory(VK.Device(), m_selectionMapVsUniformBufferMemory, 0, bufferSize, 0, &m_selectionMapVsUniformBufferMapped);
+    }
 }
 
 void WizardChess::CreateDescriptorPool()
 {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = 3 * static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);  // one for VS, one for FS, one for shadow pass VS
+    poolSizes[0].descriptorCount = 4 * static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);  // one for VS, one for FS, one for shadow pass VS, one for selection map VS
     poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[1].descriptorCount = 2 * static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);  // one for FS, one for shadow pass FS
 
@@ -1323,7 +1634,7 @@ void WizardChess::CreateDescriptorPool()
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes    = poolSizes.data();
-    poolInfo.maxSets       = 2 * static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolInfo.maxSets       = 2 * static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) + 1;
 
     if (vkCreateDescriptorPool(VK.Device(), &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS)
     {
@@ -1439,6 +1750,37 @@ void WizardChess::CreateDescriptorSets()
             vkUpdateDescriptorSets(VK.Device(), static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
         }
     }
+
+    // Selection map
+    {
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool     = m_descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts        = &m_selectionMapDescriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(VK.Device(), &allocInfo, &m_selectionMapDescriptorSet) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to allocate descriptor sets!");
+        }
+
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = m_selectionMapVsUniformBuffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range  = sizeof(UniformBufferObjectSelectionMapVs);
+
+        std::array<VkWriteDescriptorSet, 1> descriptorWrites{};
+
+        descriptorWrites[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet          = m_selectionMapDescriptorSet;
+        descriptorWrites[0].dstBinding      = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo     = &bufferInfo;
+
+        vkUpdateDescriptorSets(VK.Device(), static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+    }
 }
 
 void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
@@ -1455,12 +1797,111 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     // Get the current swap chain extent for setting up the render area.
     auto swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
 
+    // Create push constants for passing small amounts of dynamic data to shaders.
+    ModelPushConstants pushConstants{};
+    pushConstants.vs.world = glm::mat4(1.0);
+    float worldScale = 3.75f;
+    pushConstants.vs.world = glm::scale(pushConstants.vs.world, glm::vec3(worldScale, worldScale, worldScale));
+
 #if ROTATE_WORLD
     // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-#endif // ROTATE_WORLD
+
+    pushConstants.vs.world = glm::rotate(pushConstants.vs.world, time * glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+#endif // #if ROTATE
+
+    auto RecordDrawModel = [commandBuffer=commandBuffer](
+        const ModelPushConstants* pPushConstants,
+        Model*                    pModel,
+        const VkPipelineLayout    pipelineLayout,
+        bool                      needVsPushConstants,
+        bool                      needFsPushConstants)
+    {
+        // Bind the vertex buffer for the current model.
+        VkBuffer vertexBuffers[] = { pModel->VertexBuffer() };
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+        // Bind the index buffer for the current model.
+        vkCmdBindIndexBuffer(commandBuffer, pModel->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        if (needVsPushConstants)
+        {
+            // Pass the VS push constant to the vertex shader.
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, offsetof(ModelPushConstants, vs),
+                sizeof(ModelPushConstants::ModelVsPushConstants), &pPushConstants->vs);
+        }
+
+        if (needFsPushConstants)
+        {
+            // Pass the FS push constant to the fragment shader.
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, offsetof(ModelPushConstants, fs),
+                sizeof(ModelPushConstants::ModelFsPushConstants), &pPushConstants->fs);
+        }
+
+        // Issue a draw command for the indexed geometry of the model.
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(pModel->Indices()), 1, 0, 0, 0);
+    };
+
+    auto RenderChessBoard = [&](
+        ModelPushConstants&       pushConstants,
+        const VkPipelineLayout    pipelineLayout,
+        bool                      needVsPushConstants,
+        bool                      needFsPushConstants,
+        bool                      isSelectionMapPass = false)
+    {
+        Model* pModel = m_uniqueModels[EModelName::Cube];
+
+        pushConstants.vs.isBlack         = 0;
+        pushConstants.vs.model           = pModel->ModelMatrix();
+        pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
+        if (isSelectionMapPass)
+        {
+            pushConstants.fs.fileRank    = {};
+        }
+        else
+        {
+            pushConstants.fs.renderMode  = pModel->RenderMode();
+        }
+
+        RecordDrawModel(&pushConstants, pModel, pipelineLayout, needVsPushConstants, needFsPushConstants);
+    };
+
+    auto RenderChessPieces = [&](
+        ModelPushConstants&       pushConstants,
+        const VkPipelineLayout    pipelineLayout,
+        bool                      needVsPushConstants,
+        bool                      needFsPushConstants,
+        bool                      isSelectionMapPass = false)
+    {
+        // Render each chess piece in the scene.
+        for (const auto& chessPiece : chessPieces)
+        {
+            Model* pModel = m_uniqueModels[chessPiece.m_modelName];
+
+            pushConstants.vs.model           = glm::mat4(1.0);
+            float modelScale = 1.0f / 4.75f;
+            pushConstants.vs.model           = glm::scale(pushConstants.vs.model, glm::vec3(modelScale, modelScale, modelScale));
+            pushConstants.vs.model           = glm::translate(pushConstants.vs.model, glm::vec3(-3.5f, 0.0f, 3.5f));
+            pushConstants.vs.model           = glm::translate(pushConstants.vs.model, chessPiece.PositionVec3());
+            pushConstants.vs.model           = pushConstants.vs.model * pModel->ModelMatrix();
+            pushConstants.vs.isBlack         = chessPiece.m_color == EPieceColor::Black;
+            pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
+            if (isSelectionMapPass)
+            {
+                pushConstants.fs.fileRank.file = chessPiece.m_file - 'A' + 1;
+                pushConstants.fs.fileRank.rank = chessPiece.m_rank - '1' + 1;
+            }
+            else
+            {
+                pushConstants.fs.renderMode    = pModel->RenderMode();
+            }
+
+            RecordDrawModel(&pushConstants, pModel, pipelineLayout, needVsPushConstants, needFsPushConstants);
+        }
+    };
 
     // First shadow map pass
     {
@@ -1504,54 +1945,7 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
         // Bind the descriptor set for the current frame, providing shader resources like textures and uniform buffers.
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPassPipelineLayout, 0, 1, &m_shadowPassDescriptorSets[m_currentImage], 0, nullptr);
 
-        // Create push constants for passing small amounts of dynamic data to shaders.
-        ModelPushConstants pushConstants{};
-        pushConstants.vs.world = glm::mat4(1.0);
-
-#if ROTATE_WORLD
-        // Rotate
-        {
-            // Add back offset
-            pushConstants.vs.world = glm::translate(pushConstants.vs.world, glm::vec3(3.5, 0, -3.5));
-
-            // Rotate to display the world
-            pushConstants.vs.world = glm::rotate(pushConstants.vs.world, time * glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-            // Add offset to center the world
-            pushConstants.vs.world = glm::translate(pushConstants.vs.world, glm::vec3(-3.5, 0, 3.5));
-        }
-#endif // #if ROTATE
-
-        auto RecordDrawModel = [commandBuffer=commandBuffer, pipelineLayout=m_shadowPassPipelineLayout](const ModelPushConstants* pPushConstants, Model* pModel)
-        {
-            // Bind the vertex buffer for the current model.
-            VkBuffer vertexBuffers[] = { pModel->VertexBuffer() };
-            VkDeviceSize offsets[] = { 0 };
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
-            // Bind the index buffer for the current model.
-            vkCmdBindIndexBuffer(commandBuffer, pModel->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-            // Pass the VS push constant to the vertex shader.
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, offsetof(ModelPushConstants, vs), sizeof(ModelPushConstants::ModelVsPushConstants), &pPushConstants->vs);
-
-            // Issue a draw command for the indexed geometry of the model.
-            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(pModel->Indices()), 1, 0, 0, 0);
-        };
-
-        // Render each chess piece in the scene.
-        for (const auto& chessPiece : chessPieces)
-        {
-            Model* pModel = m_uniqueModels[chessPiece.m_modelName];
-
-            // Populate the push constants.
-            pushConstants.vs.model           = glm::translate(glm::mat4(1.0), chessPiece.PositionVec3());
-            pushConstants.vs.model           = pushConstants.vs.model * pModel->ModelMatrix();
-            pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
-            pushConstants.vs.isBlack         = chessPiece.m_color == EPieceColor::Black;
-
-            RecordDrawModel(&pushConstants, pModel);
-        }
+        RenderChessPieces(pushConstants, m_shadowPassPipelineLayout, true, false);
 
         // End the render pass.
         vkCmdEndRenderPass(commandBuffer);
@@ -1602,70 +1996,53 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
         // Bind the descriptor set for the current frame, providing shader resources like textures and uniform buffers.
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[m_currentImage], 0, nullptr);
 
-        // Create push constants for passing small amounts of dynamic data to shaders.
-        ModelPushConstants pushConstants{};
-        pushConstants.vs.world = glm::mat4(1.0);
+        RenderChessPieces(pushConstants, m_pipelineLayout, true, true);
+        RenderChessBoard(pushConstants, m_pipelineLayout, true, true);
 
-#if ROTATE_WORLD
-        // Rotate
-        {
-            // Add back offset
-            pushConstants.vs.world = glm::translate(pushConstants.vs.world, glm::vec3(3.5, 0, -3.5));
+        // End the render pass.
+        vkCmdEndRenderPass(commandBuffer);
+    }
 
-            // Rotate to display the world
-            pushConstants.vs.world = glm::rotate(pushConstants.vs.world, time * glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Third selection map pass
+    {
+        // Configure the render pass begin info.
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass        = m_selectionMapRenderPass;
+        renderPassInfo.framebuffer       = m_selectionMapFramebuffer;
+        renderPassInfo.renderArea.offset = { 0, 0 };
+        renderPassInfo.renderArea.extent = swapChainExtent;
 
-            // Add offset to center the world
-            pushConstants.vs.world = glm::translate(pushConstants.vs.world, glm::vec3(-3.5, 0, 3.5));
-        }
-#endif // #if ROTATE
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+        clearValues[1].depthStencil = { 1.0f, 0 };
 
-        auto RecordDrawModel = [commandBuffer=commandBuffer, pipelineLayout=m_pipelineLayout](const ModelPushConstants* pPushConstants, Model* pModel)
-        {
-            // Bind the vertex buffer for the current model.
-            VkBuffer vertexBuffers[] = { pModel->VertexBuffer() };
-            VkDeviceSize offsets[] = { 0 };
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+        renderPassInfo.pClearValues    = clearValues.data();
 
-            // Bind the index buffer for the current model.
-            vkCmdBindIndexBuffer(commandBuffer, pModel->IndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_selectionMapGraphicsPipeline);
 
-            // Pass the VS push constant to the vertex shader.
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, offsetof(ModelPushConstants, vs), sizeof(ModelPushConstants::ModelVsPushConstants), &pPushConstants->vs);
+        VkViewport viewport{};
+        viewport.x        = 0.0f;
+        viewport.y        = 0.0f;
+        viewport.width    = (float)swapChainExtent.width;
+        viewport.height   = (float)swapChainExtent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
-            // Pass the FS push constant to the fragment shader.
-            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, offsetof(ModelPushConstants, fs), sizeof(ModelPushConstants::ModelFsPushConstants), &pPushConstants->fs);
+        VkRect2D scissor{};
+        scissor.offset = { 0, 0 };
+        scissor.extent = swapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-            // Issue a draw command for the indexed geometry of the model.
-            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(pModel->Indices()), 1, 0, 0, 0);
-        };
+        // Bind the descriptor set for the current frame, providing shader resources like textures and uniform buffers.
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_selectionMapPipelineLayout, 0, 1, &m_selectionMapDescriptorSet, 0, nullptr);
 
-        // Render the chess board.
-        {
-            Model* pModel = m_uniqueModels[EModelName::Cube];
-
-            // Populate the push constants.
-            pushConstants.vs.model = pModel->ModelMatrix();
-            pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
-            pushConstants.fs.renderMode = pModel->RenderMode();
-
-            RecordDrawModel(&pushConstants, pModel);
-        }
-
-        // Render each chess piece in the scene.
-        for (const auto& chessPiece : chessPieces)
-        {
-            Model* pModel = m_uniqueModels[chessPiece.m_modelName];
-
-            // Populate the push constants.
-            pushConstants.vs.model           = glm::translate(glm::mat4(1.0), chessPiece.PositionVec3());
-            pushConstants.vs.model           = pushConstants.vs.model * pModel->ModelMatrix();
-            pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
-            pushConstants.vs.isBlack         = chessPiece.m_color == EPieceColor::Black;
-            pushConstants.fs.renderMode      = pModel->RenderMode();
-
-            RecordDrawModel(&pushConstants, pModel);
-        }
+        RenderChessPieces(pushConstants, m_selectionMapPipelineLayout, true, true, true);
+        RenderChessBoard(pushConstants, m_selectionMapPipelineLayout, true, true, true);
 
         // End the render pass.
         vkCmdEndRenderPass(commandBuffer);
@@ -1714,6 +2091,7 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
         const float      latitude,
         const float      radius,
         const glm::vec3& targetPos,
+        const glm::vec3& upVector,
         glm::vec3&       cameraPos,
         glm::mat4&       cameraView)
     {
@@ -1724,13 +2102,11 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
             radius * cos(latitude) * cos(longitude)   // Z
         );
 
-        const auto upVector = glm::vec3(0.0f, 1.0f, 0.0f);
-
         // Define camera view matrix
         cameraView = glm::lookAt(cameraPos, targetPos, upVector);
     };
 
-    const glm::vec3 targetPos = glm::vec3(3.5f, 0.0f, -3.5f);
+    const glm::vec3 targetPos = glm::vec3(0.0f, 0.0f, 0.0f);
     glm::vec3       cameraPos;
     glm::mat4       cameraView;
     glm::vec3       lightPos;
@@ -1741,6 +2117,7 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
         glm::radians(30.0f),    // phi, vertical rotation
         10.0f,                  // Distance from center
         targetPos,
+        glm::vec3(0.0f, 1.0f, 0.0f), // upVector
         cameraPos,
         cameraView);
 
@@ -1749,6 +2126,7 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
         glm::radians(45.0f),
         15.0f,
         targetPos,
+        glm::vec3(0.0f, 1.0f, 0.0f), // upVector
         lightPos,
         lightView);
 
@@ -1793,6 +2171,81 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
         ubo.cameraPos  = cameraPos;
         memcpy(m_fsUniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
+
+    // Selection map vertex shader ubo
+    {
+        UniformBufferObjectSelectionMapVs ubo{};
+        ubo.view = cameraView;
+        ubo.proj = proj;
+        memcpy(m_selectionMapVsUniformBufferMapped, &ubo, sizeof(ubo));
+    }
+}
+
+void WizardChess::ReadSelectionMap(VkImageLayout oldLayout, uint32_t fboX, uint32_t fboY, int* pFile, int* pRank) const
+{
+    VkDevice device = VK.Device();
+    VkFormat format = m_selectionMapFormat;
+
+    vkDeviceWaitIdle(device);
+
+    // 1. Create a staging buffer
+    VkBuffer       stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkExtent2D     extent = VK.SurfaceManager()->SwapChainExtent();
+    const uint32_t width  = extent.width;
+    const uint32_t height = extent.height;
+
+    CreateBuffer(width * height * sizeof(float),
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer,
+                 stagingBufferMemory);
+
+    // 2. Transition image to transfer source layout
+    TransitionImageLayout(VK_NULL_HANDLE, m_selectionMapImage, format, oldLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    // 3. Copy buffer to staging buffer
+    CopyImageToBuffer(m_selectionMapImage,
+                      stagingBuffer,
+                      (format == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                      width,
+                      height);
+
+    // 4. Map memory and normalize depth values
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
+
+    std::vector<uint8_t> bmpData;
+
+    if (format == VK_FORMAT_B8G8R8A8_UNORM)
+    {
+        bmpData.resize(width * height * sizeof(float));
+        memcpy(bmpData.data(), data, width * height * sizeof(float));
+    }
+    else
+    {
+        assert(false);
+    }
+
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    // 5. Read here
+    uint8_t* pPixelColor = &bmpData[(fboY * width + fboX) * sizeof(float)];
+    float rColor = pPixelColor[2] / 255.0f * 8.0f;
+    float gColor = pPixelColor[1] / 255.0f * 8.0f;
+    int file = (int)roundf(rColor);
+    int rank = (int)roundf(gColor);
+    *pFile = file;
+    *pRank = rank;
+
+    // Cleanup
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+    // 6. Transition image from transfer source layout back to old layout
+    TransitionImageLayout(VK_NULL_HANDLE, m_selectionMapImage, format, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, oldLayout);
+
+    vkDeviceWaitIdle(VK.Device());
 }
 
 void WizardChess::SaveImageAsBMP(VkDevice device, VkImage image, VkFormat format, VkImageLayout oldLayout, int width, int height, std::string fileName)
@@ -1841,6 +2294,11 @@ void WizardChess::SaveImageAsBMP(VkDevice device, VkImage image, VkFormat format
         }
     }
     else if (format == VK_FORMAT_B8G8R8A8_SRGB)
+    {
+        bmpData.resize(width * height * 4);
+        memcpy(bmpData.data(), data, width * height * 4);
+    }
+    else if (format == VK_FORMAT_B8G8R8A8_UNORM)
     {
         bmpData.resize(width * height * 4);
         memcpy(bmpData.data(), data, width * height * 4);
@@ -1951,6 +2409,8 @@ void WizardChess::DrawFrame()
         VkImage image = VK.SurfaceManager()->SwapChainImages()[m_currentImage];
         VkFormat format = VK.SurfaceManager()->SwapChainImageFormat();
         SaveImageAsBMP(VK.Device(), image, format, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, extent.width, extent.height, "present.bmp");
+
+        SaveImageAsBMP(VK.Device(), m_selectionMapImage, m_selectionMapFormat, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, extent.width, extent.height, "select.bmp");
     }
 
     m_currentImage = (m_currentImage + 1) % MAX_FRAMES_IN_FLIGHT;

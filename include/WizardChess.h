@@ -6,6 +6,7 @@
 
 #include <vector>
 #include <optional>
+#include <cstdio>
 
 #include "Model.h"
 
@@ -40,6 +41,7 @@ public:
 
     int WindowWidth()  const { return m_width; }
     int WindowHeight() const { return m_height; }
+    void ReadSelectionMap(VkImageLayout oldLayout, uint32_t fboX, uint32_t fboY, int* pFile, int* pRank) const;
 
 private:
     void     InitVulkan();
@@ -47,22 +49,37 @@ private:
     void     CleanupSwapChain();
     void     Cleanup();
     void     RecreateSwapChain();
+
     void     CreateRenderPass();
+    void     CreateShadowPassRenderPass();
+    void     CreateScenePassRenderPass();
+    void     CreateSelectionMapPassRenderPass();
+
     void     CreateDescriptorSetLayout();
+
+    void     CreatePipelines();
     void     CreateGraphicsPipeline();
     void     CreateShadowPassGraphicsPipeline();
+    void     CreateSelectionMapGraphicsPipeline();
+
+    void     CreateFramebuffers();
     void     CreateSwapChainFramebuffers();
     void     CreateShadowPassFramebuffers();
+    void     CreateSelectionMapFramebuffers();
+
+    void     CreateResources();
     void     CreateDepthResources();
     void     CreateShadowMapResources();
+    void     CreateSelectionMapResources();
+
     VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
-    VkFormat FindDepthFormat();
+    VkFormat DepthFormat();
     bool     HasStencilComponent(VkFormat format);
     void     CreateTextureImage();
     void     CreateTextureImageView();
     void     CreateTextureSampler();
     void     CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-    void     TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void     TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) const;
     void     LoadModel();
     void     CreateUniformBuffers();
     void     CreateDescriptorPool();
@@ -78,12 +95,14 @@ private:
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
     VkFramebuffer           m_shadowPassFramebuffer         = VK_NULL_HANDLE;
+    VkFramebuffer           m_selectionMapFramebuffer       = VK_NULL_HANDLE;
 
     VkRenderPass            m_renderPass                    = VK_NULL_HANDLE;
     VkDescriptorSetLayout   m_descriptorSetLayout           = VK_NULL_HANDLE;
     VkPipelineLayout        m_pipelineLayout                = VK_NULL_HANDLE;
     VkPipeline              m_graphicsPipeline              = VK_NULL_HANDLE;
 
+    VkFormat                m_depthFormat                   = VK_FORMAT_UNDEFINED;
     VkImage                 m_depthImage                    = VK_NULL_HANDLE;
     VkDeviceMemory          m_depthImageMemory              = VK_NULL_HANDLE;
     VkImageView             m_depthImageView                = VK_NULL_HANDLE;
@@ -104,6 +123,15 @@ private:
     VkImageView             m_shadowImageView               = VK_NULL_HANDLE;
     VkSampler               m_shadowImageSampler            = VK_NULL_HANDLE;
 
+    const VkFormat          m_selectionMapFormat              = VK_FORMAT_B8G8R8A8_UNORM;
+    VkRenderPass            m_selectionMapRenderPass          = VK_NULL_HANDLE;
+    VkDescriptorSetLayout   m_selectionMapDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout        m_selectionMapPipelineLayout      = VK_NULL_HANDLE;
+    VkPipeline              m_selectionMapGraphicsPipeline    = VK_NULL_HANDLE;
+    VkImage                 m_selectionMapImage               = VK_NULL_HANDLE;
+    VkDeviceMemory          m_selectionMapImageMemory         = VK_NULL_HANDLE;
+    VkImageView             m_selectionMapImageView           = VK_NULL_HANDLE;
+
     std::unordered_map<EModelName, Model*>  m_uniqueModels;
 
     std::vector<VkBuffer>       m_vsUniformBuffers;
@@ -118,9 +146,14 @@ private:
     std::vector<VkDeviceMemory> m_shadowVsUniformBuffersMemory;
     std::vector<void*>          m_shadowVsUniformBuffersMapped;
 
+    VkBuffer                    m_selectionMapVsUniformBuffer       = VK_NULL_HANDLE;
+    VkDeviceMemory              m_selectionMapVsUniformBufferMemory = VK_NULL_HANDLE;
+    void*                       m_selectionMapVsUniformBufferMapped = nullptr;
+
     VkDescriptorPool             m_descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> m_descriptorSets;
     std::vector<VkDescriptorSet> m_shadowPassDescriptorSets;
+    VkDescriptorSet              m_selectionMapDescriptorSet = VK_NULL_HANDLE;
 
     std::vector<VkCommandBuffer> m_commandBuffers;
 
