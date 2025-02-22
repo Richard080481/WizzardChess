@@ -27,6 +27,7 @@
 #include "VulkanSurfaceManager.h"
 
 #define ROTATE_WORLD false
+#define ROTATE_LIGHT false
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -265,6 +266,83 @@ void WizardChess::MouseButtonCallback(int button, float mouseX, float mouseY, in
 #endif // #if DEBUG
         }
     }
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+    {
+        if (action == GLFW_PRESS)
+        {
+            m_mouseDragging = true;
+            m_mouseLastX    = mouseX;
+            m_mouseLastY    = mouseY;
+        }
+        else if (action == GLFW_RELEASE)
+        {
+            m_mouseDragging = false;
+        }
+    }
+}
+
+static void cursorPosCallback(GLFWwindow* window, double mouseX, double mouseY)
+{
+    auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
+
+    app->CursorPosCallback((float)mouseX, (float)mouseY);
+}
+
+void WizardChess::CursorPosCallback(float mouseX, float mouseY)
+{
+    if (m_mouseDragging)
+    {
+        double dx = mouseX - m_mouseLastX;
+        double dy = mouseY - m_mouseLastY;
+
+        m_mouseLastX = mouseX;
+        m_mouseLastY = mouseY;
+
+        float sensitivity = 0.25f;
+        m_mouseRotateAngleX += static_cast<float>(dx) * sensitivity;
+        m_mouseRotateAngleY += static_cast<float>(dy) * sensitivity;
+
+        while (m_mouseRotateAngleX > 360.0f) m_mouseRotateAngleX -= 360.0f;
+        while (m_mouseRotateAngleX < 0.0f) m_mouseRotateAngleX += 360.0f;
+        if (m_mouseRotateAngleY > 90.0f) m_mouseRotateAngleY = 90.0f;
+        if (m_mouseRotateAngleY < 10.0f) m_mouseRotateAngleY = 10.0f;
+
+        UpdateMouseRotateMat();
+#if DEBUG
+        printf("mouseX: %f, mouseY: %f, ", mouseX, mouseY);
+        printf("m_mouseRotateAngleX: %f, m_mouseRotateAngleY: %f, ", m_mouseRotateAngleX, m_mouseRotateAngleY);
+        printf("dx: %f, dy: %f\n", dx, dy);
+
+        for (int i = 0; i < 4; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                printf("%6.4f ", m_mouseRotateMat[i][j]);
+            }
+            printf("\n");
+        }
+#endif // #if DEBUG
+    }
+}
+
+static void scrollCallback(GLFWwindow* window, double offsetX, double offsetY)
+{
+    auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
+    app->ScrollCallback(offsetX, offsetY);
+}
+
+void WizardChess::ScrollCallback(double offsetX, double offsetY)
+{
+    WC_UNUSED_PARAMETER(offsetX);
+    m_mouseZoom *= pow(1.1f, static_cast<float>(offsetY)); // Adjust zoom speed
+    m_mouseZoom = glm::clamp(m_mouseZoom, 0.9f, 1.3f); // Prevent extreme zoom
+}
+
+void WizardChess::UpdateMouseRotateMat()
+{
+    m_mouseRotateMat = glm::mat4(1.0f);
+    m_mouseRotateMat = glm::rotate(m_mouseRotateMat, glm::radians(m_mouseRotateAngleY), glm::vec3(1.0f, 0.0f, 0.0f)); // Rotate around X-axis
+    m_mouseRotateMat = glm::rotate(m_mouseRotateMat, glm::radians(m_mouseRotateAngleX), glm::vec3(0.0f, 1.0f, 0.0f)); // Rotate around Y-axis
 }
 
 void WizardChess::InitVulkan()
@@ -282,6 +360,8 @@ void WizardChess::InitVulkan()
     pSurfaceManager->SetWindowUserPointer(this);
     pSurfaceManager->SetFramebufferSizeCallback(framebufferResizeCallback);
     pSurfaceManager->SetMouseButtonCallback(mouseButtonCallback);
+    pSurfaceManager->SetCursorPosCallback(cursorPosCallback);
+    pSurfaceManager->SetScrollCallback(scrollCallback);
 
     // Enable validation layers for debugging and error checking (if enabled).
     // This registers the list of validation layers that will be used.
@@ -342,6 +422,7 @@ void WizardChess::InitVulkan()
 
     // Create uniform buffers to hold per-frame data like transformation matrices.
     CreateUniformBuffers();
+    UpdateMouseRotateMat();
 
     // Create a descriptor pool, which allocates resources for descriptor sets.
     CreateDescriptorPool();
@@ -1808,7 +1889,7 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
 
     // Create push constants for passing small amounts of dynamic data to shaders.
     ModelPushConstants pushConstants{};
-    pushConstants.vs.world = glm::mat4(1.0);
+    pushConstants.vs.world = m_mouseRotateMat;
     float worldScale = 3.75f;
     pushConstants.vs.world = glm::scale(pushConstants.vs.world, glm::vec3(worldScale, worldScale, worldScale));
 
@@ -2094,10 +2175,14 @@ void WizardChess::CreateSyncObjects()
 
 void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
 {
+#if ROTATE_LIGHT
     // Calculate elapsed time to create a dynamic rotation effect for models.
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+#else
+    float time = 0.0f;
+#endif // #if ROTATE_LIGHT
 
     auto GetCameraPosVecAndViewMatrix = [](
         const float      longitude,
@@ -2127,8 +2212,8 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
 
     GetCameraPosVecAndViewMatrix(
         glm::radians(0.0f),     // theta, horizontal rotation
-        glm::radians(30.0f),    // phi, vertical rotation
-        10.0f,                  // Distance from center
+        glm::radians(0.0f),     // phi, vertical rotation
+        10.0f / m_mouseZoom,    // Distance from center
         targetPos,
         glm::vec3(0.0f, 1.0f, 0.0f), // upVector
         cameraPos,
@@ -2137,14 +2222,14 @@ void WizardChess::UpdateUniformBuffer(uint32_t currentImage)
     GetCameraPosVecAndViewMatrix(
         glm::radians(-45.0f + (15.0f * time)),
         glm::radians(45.0f),
-        15.0f,
+        25.0f,
         targetPos,
         glm::vec3(0.0f, 1.0f, 0.0f), // upVector
         lightPos,
         lightView);
 
     VkExtent2D swapChainExtent = VK.SurfaceManager()->SwapChainExtent();
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 3.0f, 80.0f);
+    glm::mat4 proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 1.0f, 80.0f);
 
     // Define orthographic projection
     float orthoSize = 5.0f;

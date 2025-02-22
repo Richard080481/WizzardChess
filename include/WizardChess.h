@@ -43,6 +43,8 @@ public:
     int WindowHeight() const { return m_height; }
 
     void MouseButtonCallback(int button, float mouseX, float mouseY, int action);
+    void CursorPosCallback(float mouseX, float mouseY);
+    void ScrollCallback(double offsetX, double offsetY);
     void ReadSelectionMap(VkImageLayout oldLayout, uint32_t fboX, uint32_t fboY, int* pFile, int* pRank) const;
     void ToggleSelectedFileRank(int file, int rank)
     {
@@ -117,6 +119,15 @@ private:
 
     int m_width;
     int m_height;
+
+    void UpdateMouseRotateMat();
+    glm::mat4 m_mouseRotateMat = glm::mat4(1.0);
+    float m_mouseLastX        = 0.0f;
+    float m_mouseLastY        = 0.0f;
+    float m_mouseRotateAngleX = 0.0f;
+    float m_mouseRotateAngleY = 30.0f;
+    bool  m_mouseDragging     = false;
+    float m_mouseZoom         = 1.0f;
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
     VkFramebuffer           m_shadowPassFramebuffer         = VK_NULL_HANDLE;

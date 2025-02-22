@@ -41,6 +41,14 @@ public:
     {
         glfwSetMouseButtonCallback(m_window, callback);
     }
+    void SetCursorPosCallback(GLFWcursorposfun callback) const
+    {
+        glfwSetCursorPosCallback(m_window, callback);
+    }
+    void SetScrollCallback(GLFWscrollfun callback) const
+    {
+        glfwSetScrollCallback(m_window, callback);
+    }
     int WindowShouldClose() const
     {
         return glfwWindowShouldClose(m_window);
