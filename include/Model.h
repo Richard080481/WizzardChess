@@ -30,12 +30,17 @@ enum class ERenderMode : int
 
 struct ModelPushConstants
 {
+    enum
+    {
+        PUSH_CONSTANT_FLAG_IS_BLACK    = 0x1,
+        PUSH_CONSTANT_FLAG_IS_SELECTED = 0x2
+    };
     struct ModelVsPushConstants
     {
         glm::mat4 world;
         glm::mat4 model;
         glm::mat4 normailzeMatrix;
-        uint32_t  isBlack;
+        uint32_t  flag;
     } vs;
 
     struct ModelFsPushConstants

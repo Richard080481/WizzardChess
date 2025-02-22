@@ -41,7 +41,32 @@ public:
 
     int WindowWidth()  const { return m_width; }
     int WindowHeight() const { return m_height; }
+
+    void MouseButtonCallback(int button, float mouseX, float mouseY, int action);
     void ReadSelectionMap(VkImageLayout oldLayout, uint32_t fboX, uint32_t fboY, int* pFile, int* pRank) const;
+    void ToggleSelectedFileRank(int file, int rank)
+    {
+        if ((file != m_selectedFile) || (rank != m_selectedRank))
+        {
+            SetSelectedFileRank(file, rank);
+        }
+        else
+        {
+            ResetSelectedFileRank();
+        }
+    }
+    void SetSelectedFileRank(int file, int rank)
+    {
+        m_selectedFile = file;
+        m_selectedRank = rank;
+    }
+    void ResetSelectedFileRank()
+    {
+        m_selectedFile = 0;
+        m_selectedRank = 0;
+    }
+    int m_selectedFile = 0; // 1-indexed. i.e. 1 means 'A' file
+    int m_selectedRank = 0; // 1-indexed. i.e. 1 means '1st' rank
 
 private:
     void     InitVulkan();

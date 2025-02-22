@@ -239,21 +239,30 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
 {
     WC_UNUSED_PARAMETER(mods);
 
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
+    double mouseX, mouseY;
+    glfwGetCursorPos(window, &mouseX, &mouseY);
+
+    auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
+    app->MouseButtonCallback(button, (float)mouseX, (float)mouseY, action);
+}
+
+void WizardChess::MouseButtonCallback(int button, float mouseX, float mouseY, int action)
+{
+    if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
-        // Left mouse button pressed
-        double mouseX, mouseY;
-        glfwGetCursorPos(window, &mouseX, &mouseY);
-        // printf("mouse: %f %f\n", mouseX, mouseY);
-
-        auto app = reinterpret_cast<WizardChess*>(glfwGetWindowUserPointer(window));
-
-        int file;
-        int rank;
-        app->ReadSelectionMap(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (uint32_t)mouseX, (uint32_t)mouseY, &file, &rank);
-        if ((file != 0) && (rank != 0))
+        if (action == GLFW_PRESS)
         {
-            printf("%c%c\n", file - 1 + 'A', rank + '0');
+            int file;
+            int rank;
+            ReadSelectionMap(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (uint32_t)mouseX, (uint32_t)mouseY, &file, &rank);
+            ToggleSelectedFileRank(file, rank);
+
+#if DEBUG
+            if ((file != 0) && (rank != 0))
+            {
+                printf("%c%c\n", file - 1 + 'A', rank + '0');
+            }
+#endif // #if DEBUG
         }
     }
 }
@@ -1810,7 +1819,7 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
     pushConstants.vs.world = glm::rotate(pushConstants.vs.world, time * glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-#endif // #if ROTATE
+#endif // #if ROTATE_WORLD
 
     auto RecordDrawModel = [commandBuffer=commandBuffer](
         const ModelPushConstants* pPushConstants,
@@ -1854,7 +1863,7 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     {
         Model* pModel = m_uniqueModels[EModelName::Cube];
 
-        pushConstants.vs.isBlack         = 0;
+        pushConstants.vs.flag            = 0;
         pushConstants.vs.model           = pModel->ModelMatrix();
         pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
         if (isSelectionMapPass)
@@ -1887,8 +1896,12 @@ void WizardChess::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
             pushConstants.vs.model           = glm::translate(pushConstants.vs.model, glm::vec3(-3.5f, 0.0f, 3.5f));
             pushConstants.vs.model           = glm::translate(pushConstants.vs.model, chessPiece.PositionVec3());
             pushConstants.vs.model           = pushConstants.vs.model * pModel->ModelMatrix();
-            pushConstants.vs.isBlack         = chessPiece.m_color == EPieceColor::Black;
             pushConstants.vs.normailzeMatrix = pModel->NormalizeMatrix();
+            pushConstants.vs.flag = 0;
+            pushConstants.vs.flag |= (chessPiece.m_color == EPieceColor::Black) ? ModelPushConstants::PUSH_CONSTANT_FLAG_IS_BLACK : 0;
+            pushConstants.vs.flag |= ((chessPiece.m_file - 'A' + 1 == m_selectedFile) &&
+                                      (chessPiece.m_rank - '1' + 1 == m_selectedRank)) ? ModelPushConstants::PUSH_CONSTANT_FLAG_IS_SELECTED : 0;
+
             if (isSelectionMapPass)
             {
                 pushConstants.fs.fileRank.file = chessPiece.m_file - 'A' + 1;
