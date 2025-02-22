@@ -2,7 +2,7 @@
 
 #define PUSH_CONSTANT_FLAG_IS_BLACK    0x1
 #define PUSH_CONSTANT_FLAG_IS_SELECTED 0x2
-#define selected_offset 0.5f
+#define selected_offset 0.1f
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
@@ -47,12 +47,14 @@ mat4 translationMatrix(vec3 translation)
 
 void main()
 {
-    mat4 model     = pushConstant.world * pushConstant.model * pushConstant.normalizeMatrix;
+    mat4 model     = pushConstant.model * pushConstant.normalizeMatrix;
 
     if ((pushConstant.flag & PUSH_CONSTANT_FLAG_IS_SELECTED) != 0)
     {
         model = translationMatrix(vec3(0.0, selected_offset, 0.0)) * model;
     }
+
+    model = pushConstant.world * model;
 
     mat4 modelView = ubo.view * model;
 
